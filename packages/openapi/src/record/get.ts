@@ -1,6 +1,7 @@
 import type { RouteConfig } from '@asteasolutions/zod-to-openapi';
 import type { IRecord } from '@teable/core';
 import { CellFormat, FieldKeyType, recordSchema } from '@teable/core';
+import type { AxiosResponse } from 'axios';
 import { axios } from '../axios';
 import { registerRoute, urlBuilder } from '../utils';
 import { z } from '../zod';
@@ -70,12 +71,10 @@ export const GetRecordRoute: RouteConfig = registerRoute({
   tags: ['record'],
 });
 
-export const getRecord = async (tableId: string, recordId: string, query?: IGetRecordQuery) => {
-  return axios.get<IRecord>(
-    urlBuilder(GET_RECORD_URL, {
-      tableId,
-      recordId,
-    }),
-    { params: query }
-  );
-};
+export async function getRecord(
+  tableId: string,
+  recordId: string,
+  query?: IGetRecordQuery
+): Promise<AxiosResponse<IRecord>> {
+  return axios.get<IRecord>(urlBuilder(GET_RECORD_URL, { tableId, recordId }), { params: query });
+}

@@ -39,8 +39,10 @@ export enum RegionType {
   AppendRow = 'AppendRow',
   AppendColumn = 'AppendColumn',
   ColumnHeader = 'ColumnHeader',
+  GroupStatistic = 'GroupStatistic',
   ColumnStatistic = 'ColumnStatistic',
   ColumnHeaderMenu = 'ColumnHeaderMenu',
+  ColumnPrimaryIcon = 'ColumnPrimaryIcon',
   ColumnDescription = 'ColumnDescription',
   ColumnResizeHandler = 'ColumnResizeHandler',
   ColumnFreezeHandler = 'ColumnFreezeHandler',
@@ -84,6 +86,10 @@ export interface IGridColumn {
   readonly?: boolean;
   isPrimary?: boolean;
   description?: string;
+  statisticLabel?: {
+    showAlways: boolean;
+    label: string;
+  };
   customTheme?: Partial<IGridTheme>;
 }
 
@@ -188,6 +194,7 @@ export interface IGroupHeaderPoint {
   type: LinearRowType.Group;
   depth: number;
   value?: unknown;
+  isCollapsed?: boolean;
 }
 
 export interface IGroupRowPoint {

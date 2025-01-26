@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { FieldType, CellValueType } from '../constant';
 import { FieldCore } from '../field';
 import {
+  DateFormattingPreset,
   TimeFormatting,
   datetimeFormattingSchema,
   defaultDatetimeFormatting,
@@ -71,12 +72,20 @@ export class DateFieldCore extends FieldCore {
 
     if (value === '' || value == null) return null;
 
+    if (value === 'now') {
+      return dayjs().toISOString();
+    }
+
     const hasTime = /\d{1,2}:\d{2}(?::\d{2})?/.test(value);
 
     const format = `${this.options.formatting.date}${hasTime && this.options.formatting.time !== TimeFormatting.None ? ' ' + this.options.formatting.time : ''}`;
 
     try {
-      const formatValue = dayjs.tz(value, format, this.options.formatting.timeZone);
+      const formatValue = [DateFormattingPreset.European, DateFormattingPreset.US].includes(
+        this.options.formatting.date as DateFormattingPreset
+      )
+        ? dayjs.tz(value, format, this.options.formatting.timeZone)
+        : dayjs.tz(value, this.options.formatting.timeZone);
       if (!formatValue.isValid()) return null;
       return formatValue.toISOString();
     } catch (e) {
@@ -109,5 +118,12 @@ export class DateFieldCore extends FieldCore {
       return z.array(dataFieldCellValueSchema).nonempty().nullable().safeParse(cellValue);
     }
     return dataFieldCellValueSchema.nullable().safeParse(cellValue);
+  }
+
+  validateCellValueLoose(cellValue: unknown) {
+    if (this.isMultipleCellValue) {
+      return z.array(z.string()).nonempty().nullable().safeParse(cellValue);
+    }
+    return z.string().nullable().safeParse(cellValue);
   }
 }

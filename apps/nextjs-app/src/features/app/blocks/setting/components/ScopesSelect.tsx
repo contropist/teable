@@ -1,36 +1,48 @@
 import { actionPrefixMap } from '@teable/core';
-import type { ActionPrefix, AllActions } from '@teable/core';
+import type { ActionPrefix, Action } from '@teable/core';
 import { usePermissionActionsStatic } from '@teable/sdk/hooks';
-import { Checkbox, Label } from '@teable/ui-lib/shadcn';
+import { Checkbox, Label, Button } from '@teable/ui-lib/shadcn';
+import { useTranslation } from 'next-i18next';
 import { useMemo, useState } from 'react';
 
 interface IScopesSelectProps {
-  initValue?: AllActions[];
+  initValue?: Action[];
   onChange?: (value: string[]) => void;
   actionsPrefixes?: ActionPrefix[];
 }
 
 export const ScopesSelect = (props: IScopesSelectProps) => {
   const { onChange, initValue, actionsPrefixes } = props;
-  const [value, setValue] = useState<Record<AllActions, boolean>>(() => {
+  const { t } = useTranslation('token');
+  const [value, setValue] = useState<Record<Action, boolean>>(() => {
     if (initValue) {
       return initValue.reduce(
         (acc, cur) => {
           acc[cur] = true;
           return acc;
         },
-        {} as Record<AllActions, boolean>
+        {} as Record<Action, boolean>
       );
     }
-    return {} as Record<AllActions, boolean>;
+    return {} as Record<Action, boolean>;
   });
   const { actionPrefixStaticMap, actionStaticMap } = usePermissionActionsStatic();
 
-  const onCheckBoxChange = (status: boolean, val: AllActions) => {
+  const onCheckBoxChange = (status: boolean, val: Action) => {
     const actionMap = { ...value };
     actionMap[val] = status;
     setValue(actionMap);
-    const actions = Object.keys(actionMap).filter((key) => actionMap[key as AllActions]);
+    const actions = Object.keys(actionMap).filter((key) => actionMap[key as Action]);
+    onChange?.(actions);
+  };
+
+  const handleSelectAll = (prefix: ActionPrefix, shouldSelect: boolean) => {
+    const actionMap = { ...value };
+    actionPrefixMap[prefix].forEach((action) => {
+      actionMap[action] = shouldSelect;
+    });
+    setValue(actionMap);
+    const actions = Object.keys(actionMap).filter((key) => actionMap[key as Action]);
     onChange?.(actions);
   };
 
@@ -47,9 +59,19 @@ export const ScopesSelect = (props: IScopesSelectProps) => {
     <div className="space-y-3 pl-2">
       {actionsPrefix.map((actionPrefix) => {
         const actions = actionPrefixMap[actionPrefix];
+        const isAllSelected = actions.every((action) => value[action]);
         return (
-          <div key={actionPrefix} className="space-y-1">
-            <Label>{actionPrefixStaticMap[actionPrefix].title}</Label>
+          <div key={actionPrefix} className="group space-y-1">
+            <div className="flex items-center">
+              <Label>{actionPrefixStaticMap[actionPrefix].title}</Label>
+              <Button
+                variant="link"
+                className="invisible h-6 px-2 text-xs text-muted-foreground group-hover:visible"
+                onClick={() => handleSelectAll(actionPrefix, !isAllSelected)}
+              >
+                {isAllSelected ? t('edit.cancelSelectAll') : t('edit.selectAll')}
+              </Button>
+            </div>
             <div className="flex gap-3">
               {actions.map((action) => (
                 <div className="flex items-center gap-1 text-sm" key={action}>

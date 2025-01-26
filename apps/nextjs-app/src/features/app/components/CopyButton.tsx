@@ -1,4 +1,5 @@
 import { Check, Copy } from '@teable/icons';
+import { syncCopy } from '@teable/sdk/utils';
 import type { ButtonProps } from '@teable/ui-lib/shadcn';
 import { Button, cn } from '@teable/ui-lib/shadcn';
 import { useState } from 'react';
@@ -11,8 +12,8 @@ export const CopyButton = (props: ICopyButtonProps) => {
   const { text, iconClassName, ...rest } = props;
   const [isCopied, setIsCopied] = useState<boolean>(false);
 
-  const onCopy = async () => {
-    await navigator.clipboard.writeText(text);
+  const onCopy = () => {
+    syncCopy(text);
     setIsCopied(true);
     setTimeout(() => {
       setIsCopied(false);
@@ -22,7 +23,12 @@ export const CopyButton = (props: ICopyButtonProps) => {
   return (
     <Button {...rest} onClick={onCopy}>
       {isCopied ? (
-        <Check className={cn('text-green-400 dark:text-green-600', iconClassName)} />
+        <Check
+          className={cn(
+            'text-green-400 dark:text-green-600 animate-bounce duration-500 repeat-1',
+            iconClassName
+          )}
+        />
       ) : (
         <Copy className={iconClassName} />
       )}

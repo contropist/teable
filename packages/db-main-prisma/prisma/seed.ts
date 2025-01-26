@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ParseArgsConfig } from 'node:util';
 import { parseArgs } from 'node:util';
-import type { parseDsnOrThrow } from '@soluble/dsn-parser';
-import { parseDsn as parse } from '@soluble/dsn-parser';
-import { PrismaClient } from '../';
+import type { parseDsnOrThrow } from '@httpx/dsn-parser';
+import { parseDsn as parse } from '@httpx/dsn-parser';
+import { PrismaClient } from '@prisma/client';
 import { SpaceSeeds } from '../src/seeds/e2e/space-seeds';
 import { UserSeeds } from '../src/seeds/e2e/user-seeds';
 

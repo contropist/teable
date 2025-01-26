@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/naming-convention */
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import type { IOtOperation } from '@teable/core';
 import { IdPrefix, RecordOpBuilder } from '@teable/core';
-import { PrismaService } from '@teable/db-main-prisma';
+import { PrismaService, wrapWithValidationErrorHandler } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { groupBy, isEmpty, keyBy } from 'lodash';
 import { customAlphabet } from 'nanoid';
@@ -19,7 +19,7 @@ import { Timing } from '../../utils/timing';
 import type { IFieldInstance } from '../field/model/factory';
 import { createFieldInstanceByRaw } from '../field/model/factory';
 import { dbType2knexFormat, SchemaType } from '../field/util';
-import { IOpsMap } from './reference.service';
+import { IOpsMap } from './utils/compose-maps';
 
 export interface IOpsData {
   recordId: string;
@@ -27,8 +27,6 @@ export interface IOpsData {
     [dbFieldName: string]: unknown;
   };
   version: number;
-  lastModifiedTime: string;
-  lastModifiedBy: string;
 }
 
 @Injectable()
@@ -44,8 +42,8 @@ export class BatchService {
 
   private async completeMissingCtx(
     opsMap: IOpsMap,
-    fieldMap: { [fieldId: string]: IFieldInstance },
-    tableId2DbTableName: { [tableId: string]: string }
+    fieldMap: { [fieldId: string]: IFieldInstance } = {},
+    tableId2DbTableName: { [tableId: string]: string } = {}
   ) {
     const tableIds = Object.keys(opsMap);
 
@@ -106,6 +104,12 @@ export class BatchService {
     );
     const versionGroup = keyBy(raw, '__id');
 
+    opsPair.map(([recordId]) => {
+      if (!versionGroup[recordId]) {
+        throw new BadRequestException(`Record ${recordId} not found in ${tableId}`);
+      }
+    });
+
     const opsData = this.buildRecordOpsData(opsPair, versionGroup);
     if (!opsData.length) return;
 
@@ -121,8 +125,8 @@ export class BatchService {
   @Timing()
   async updateRecords(
     opsMap: IOpsMap,
-    fieldMap: { [fieldId: string]: IFieldInstance },
-    tableId2DbTableName: { [tableId: string]: string }
+    fieldMap: { [fieldId: string]: IFieldInstance } = {},
+    tableId2DbTableName: { [tableId: string]: string } = {}
   ) {
     const result = await this.completeMissingCtx(opsMap, fieldMap, tableId2DbTableName);
     fieldMap = result.fieldMap;
@@ -159,8 +163,6 @@ export class BatchService {
       {
         __version: number;
         __id: string;
-        __last_modified_time: Date;
-        __last_modified_by: string;
       }[]
     >(querySql);
   }
@@ -171,8 +173,6 @@ export class BatchService {
       [recordId: string]: {
         __version: number;
         __id: string;
-        __last_modified_time: Date;
-        __last_modified_by: string;
       };
     }
   ) {
@@ -189,14 +189,10 @@ export class BatchService {
       }, {});
 
       const version = versionGroup[recordId].__version;
-      const lastModifiedTime = versionGroup[recordId].__last_modified_time?.toISOString();
-      const lastModifiedBy = versionGroup[recordId].__last_modified_by;
 
       opsData.push({
         recordId,
         version,
-        lastModifiedTime,
-        lastModifiedBy,
         updateParam,
       });
     }
@@ -256,7 +252,7 @@ export class BatchService {
     await prisma.$executeRawUnsafe(insertTempTableSql);
 
     // 3.update data
-    await prisma.$executeRawUnsafe(updateRecordSql);
+    await wrapWithValidationErrorHandler(() => prisma.$executeRawUnsafe(updateRecordSql));
 
     // 4.delete temporary table
     const dropTempTableSql = this.knex.schema.dropTable(tempTableName).toQuery();
@@ -272,13 +268,11 @@ export class BatchService {
       return;
     }
 
-    const userId = this.cls.get('user.id');
-    const timeStr = this.cls.get('tx.timeStr') ?? new Date().toISOString();
-
-    const fieldIds = Array.from(new Set(opsData.flatMap((d) => Object.keys(d.updateParam))));
-    const shouldUpdateLastModified = fieldIds.some((id) => !fieldMap[id].isComputed);
+    const fieldIds = Array.from(new Set(opsData.flatMap((d) => Object.keys(d.updateParam)))).filter(
+      (id) => fieldMap[id]
+    );
     const data = opsData.map((data) => {
-      const { recordId, updateParam, version, lastModifiedTime, lastModifiedBy } = data;
+      const { recordId, updateParam, version } = data;
 
       return {
         id: recordId,
@@ -286,6 +280,9 @@ export class BatchService {
           ...Object.entries(updateParam).reduce<{ [dbFieldName: string]: unknown }>(
             (pre, [fieldId, value]) => {
               const field = fieldMap[fieldId];
+              if (!field) {
+                return pre;
+              }
               const { dbFieldName } = field;
               pre[dbFieldName] = field.convertCellValue2DBValue(value);
               return pre;
@@ -293,8 +290,6 @@ export class BatchService {
             {}
           ),
           __version: version + 1,
-          __last_modified_time: shouldUpdateLastModified ? timeStr : lastModifiedTime,
-          __last_modified_by: shouldUpdateLastModified ? userId : lastModifiedBy,
         },
       };
     });
@@ -305,8 +300,6 @@ export class BatchService {
         return { dbFieldName, schemaType: dbType2knexFormat(this.knex, dbFieldType) };
       }),
       { dbFieldName: '__version', schemaType: SchemaType.Integer },
-      { dbFieldName: '__last_modified_time', schemaType: SchemaType.Datetime },
-      { dbFieldName: '__last_modified_by', schemaType: SchemaType.String },
     ];
 
     await this.batchUpdateDB(dbTableName, '__id', schemas, data);
@@ -375,19 +368,37 @@ export class BatchService {
     rawOps: { rawOp: IRawOp; docId: string }[]
   ) {
     const userId = this.cls.get('user.id');
-    const insertRowsData = rawOps.map(({ rawOp, docId }) => {
-      return {
-        collection: collectionId,
-        doc_type: docType,
-        doc_id: docId,
-        version: rawOp.v,
-        operation: JSON.stringify(rawOp),
-        created_by: userId,
-        created_time: new Date().toISOString(),
-      };
-    });
+    const insertRowsData = rawOps
+      .filter(({ rawOp }) => !('del' in rawOp && rawOp.del))
+      .map(({ rawOp, docId }) => {
+        return {
+          collection: collectionId,
+          doc_type: docType,
+          doc_id: docId,
+          version: rawOp.v,
+          operation: JSON.stringify(rawOp),
+          created_by: userId,
+          created_time: new Date().toISOString(),
+        };
+      });
 
-    const batchInsertOpsSql = this.dbProvider.batchInsertSql('ops', insertRowsData);
-    return this.prismaService.txClient().$executeRawUnsafe(batchInsertOpsSql);
+    // delete history op when doc is deleted
+    const deleteIds = rawOps
+      .filter(({ rawOp }) => 'del' in rawOp && rawOp.del)
+      .map(({ docId }) => docId);
+
+    if (deleteIds.length) {
+      const deleteOpsSql = this.knex('ops')
+        .where('collection', collectionId)
+        .whereIn('doc_id', deleteIds)
+        .delete()
+        .toQuery();
+      await this.prismaService.txClient().$executeRawUnsafe(deleteOpsSql);
+    }
+
+    if (insertRowsData.length) {
+      const batchInsertOpsSql = this.dbProvider.batchInsertSql('ops', insertRowsData);
+      await this.prismaService.txClient().$executeRawUnsafe(batchInsertOpsSql);
+    }
   }
 }

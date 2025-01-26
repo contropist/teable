@@ -1,13 +1,13 @@
 /* eslint-disable @typescript-eslint/naming-convention */
 import { Injectable } from '@nestjs/common';
-import type { IOtOperation } from '@teable/core';
-import { FieldType, RecordOpBuilder } from '@teable/core';
+import type { FieldKeyType } from '@teable/core';
+import { FieldType } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { Knex } from 'knex';
 import { InjectModel } from 'nest-knexjs';
 import { ClsService } from 'nestjs-cls';
 import type { IClsStore } from '../../types/cls';
-import type { IOpsMap } from './reference.service';
+import { createFieldInstanceByRaw } from '../field/model/factory';
 
 @Injectable()
 export class SystemFieldService {
@@ -17,120 +17,88 @@ export class SystemFieldService {
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex
   ) {}
 
-  private async getTableId2DbTableNameMap(tableIds: string[]) {
-    const tableMeta = await this.prismaService.txClient().tableMeta.findMany({
-      where: { id: { in: tableIds } },
-      select: { id: true, dbTableName: true },
-    });
+  private async updateSystemField(
+    dbTableName: string,
+    recordIds: string[],
+    userId: string,
+    timeStr: string
+  ) {
+    if (!recordIds.length) return;
 
-    return tableMeta.reduce<{ [tableId: string]: string }>((pre, t) => {
-      pre[t.id] = t.dbTableName;
-      return pre;
-    }, {});
-  }
-
-  private async getRecordId2ModifiedDataMap(dbTableName: string, recordIds: string[]) {
     const nativeQuery = this.knex(dbTableName)
-      .select('__id', '__last_modified_time', '__last_modified_by')
+      .update({
+        __last_modified_time: timeStr,
+        __last_modified_by: userId,
+      })
       .whereIn('__id', recordIds)
       .toQuery();
 
-    const result = await this.prismaService
-      .txClient()
-      .$queryRawUnsafe<
-        { __id: string; __last_modified_time: Date; __last_modified_by: string }[]
-      >(nativeQuery);
-
-    return result.reduce<{
-      [recordId: string]: { lastModifiedTime: string; lastModifiedBy: string };
-    }>((pre, r) => {
-      pre[r.__id] = {
-        lastModifiedTime: r.__last_modified_time?.toISOString(),
-        lastModifiedBy: r.__last_modified_by,
-      };
-      return pre;
-    }, {});
+    await this.prismaService.txClient().$executeRawUnsafe(nativeQuery);
   }
 
-  private buildOpsByFields({
-    fields,
-    modifiedData,
-    userId,
-    timeStr,
-  }: {
-    fields: { id: string; type: FieldType }[];
-    modifiedData: { lastModifiedTime: string; lastModifiedBy: string };
-    userId: string;
-    timeStr: string;
-  }) {
-    return fields
-      .map(({ id: fieldId, type }) => {
-        const { lastModifiedTime, lastModifiedBy } = modifiedData;
-
-        if (type === FieldType.LastModifiedTime) {
-          return RecordOpBuilder.editor.setRecord.build({
-            fieldId,
-            oldCellValue: lastModifiedTime,
-            newCellValue: timeStr,
-          });
-        }
-
-        if (type === FieldType.LastModifiedBy && lastModifiedBy !== userId) {
-          return RecordOpBuilder.editor.setRecord.build({
-            fieldId,
-            oldCellValue: lastModifiedBy,
-            newCellValue: userId,
-          });
-        }
-      })
-      .filter(Boolean) as IOtOperation[];
-  }
-
-  async getOpsMapBySystemField(opsMaps: IOpsMap) {
-    const opsMap: IOpsMap = {};
-    const tableIds = Object.keys(opsMaps);
-
-    const userId = this.cls.get('user.id');
+  async getModifiedSystemOpsMap(
+    tableId: string,
+    fieldKeyType: FieldKeyType,
+    records: {
+      fields: Record<string, unknown>;
+      id: string;
+    }[]
+  ): Promise<
+    {
+      fields: Record<string, unknown>;
+      id: string;
+    }[]
+  > {
+    const user = this.cls.get('user');
     const timeStr = this.cls.get('tx.timeStr') ?? new Date().toISOString();
 
-    const tableId2DbTableName = await this.getTableId2DbTableNameMap(tableIds);
+    const { dbTableName } = await this.prismaService.txClient().tableMeta.findUniqueOrThrow({
+      where: { id: tableId },
+      select: { dbTableName: true },
+    });
 
-    for (const tableId in opsMaps) {
-      const tableOpsMap = opsMaps[tableId];
-      const recordIds = Object.keys(tableOpsMap);
+    await this.updateSystemField(
+      dbTableName,
+      records.map((r) => r.id),
+      user.id,
+      timeStr
+    );
 
-      const tinyFields = await this.prismaService.txClient().field.findMany({
-        select: { id: true, type: true },
-        where: {
-          tableId,
-          deletedTime: null,
-          type: { in: [FieldType.LastModifiedTime, FieldType.LastModifiedBy] },
-        },
-      });
+    const fieldsRaw = await this.prismaService.txClient().field.findMany({
+      where: {
+        tableId,
+        deletedTime: null,
+        type: { in: [FieldType.LastModifiedTime, FieldType.LastModifiedBy] },
+      },
+    });
 
-      if (!tinyFields.length) continue;
+    if (!fieldsRaw.length) return records;
 
-      const recordId2ModifiedDataMap = await this.getRecordId2ModifiedDataMap(
-        tableId2DbTableName[tableId],
-        recordIds
-      );
-
-      if (!opsMap[tableId]) opsMap[tableId] = {};
-
-      for (const recordId in tableOpsMap) {
-        if (!tableOpsMap[recordId]) continue;
-
-        const ops = this.buildOpsByFields({
-          fields: tinyFields as { id: string; type: FieldType }[],
-          modifiedData: recordId2ModifiedDataMap[recordId],
-          userId,
-          timeStr,
-        });
-
-        opsMap[tableId][recordId] = ops;
+    const systemRecordFields = fieldsRaw.reduce<{ [fieldId: string]: unknown }>((pre, fieldRaw) => {
+      const field = createFieldInstanceByRaw(fieldRaw);
+      const { type } = field;
+      if (type === FieldType.LastModifiedTime) {
+        pre[field[fieldKeyType]] = timeStr;
       }
-    }
 
-    return opsMap;
+      if (type === FieldType.LastModifiedBy) {
+        pre[field[fieldKeyType]] = field.convertDBValue2CellValue({
+          id: user.id,
+          title: user.name,
+          email: user.email,
+        });
+      }
+      return pre;
+    }, {});
+
+    return records.map((record) => {
+      return {
+        ...record,
+        fields: {
+          ...record.fields,
+          ...systemRecordFields,
+        },
+      };
+    });
   }
 }

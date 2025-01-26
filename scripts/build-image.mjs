@@ -33,18 +33,24 @@ const getSemver = async () => {
     isCi = true;
     const refType = env.GITHUB_REF_TYPE;
     const runNumber = env.GITHUB_RUN_NUMBER;
-    const sha = env.GITHUB_SHA.substring(0, 7);
+    const isPR = Boolean(env.GITHUB_HEAD_REF);
+    
+    console.log('isPR:', isPR);
+    console.log('refType: ', refType);
+    console.log('runNumber: ', runNumber);
 
     switch (refType) {
       case 'branch':
-        semver = `${version}-alpha+build.${runNumber}.sha-${sha}`;
+        semver = isPR
+          ? `${version}-alpha+pr-build.${runNumber}`
+          : `${version}-alpha+build.${runNumber}`;
         break;
       case 'tag':
-        semver = `${version}+build.${runNumber}.sha-${sha}`;
+        semver = `${version}+build.${runNumber}`;
         break;
     }
   }
-
+  console.log('semver: ', semver);
   return semver;
 };
 
@@ -78,7 +84,7 @@ const {
   'cache-to': cacheToArg,
   tag,
   'tag-suffix': tagSuffix,
-  platforms: platformsArg,
+  platform: platformArg,
   push: pushArg,
 } = argv;
 
@@ -86,13 +92,16 @@ const buildArgs = toArray(buildArg);
 const cacheFrom = toArray(cacheFromArg);
 const cacheTo = toArray(cacheToArg);
 const tags = toArray(tag, false, true);
-const platforms = toArray(platformsArg, true);
+const platform = platformArg ?? '';
 const push = toBoolean(pushArg);
+const remotes = Array.from(new Set(tags.map((tag) => tag.split(':')[0])));
 
-const command = ['docker', 'buildx', 'build'];
+const command = ['docker', 'build'];
 
 // BUILD_VERSION - this is a default behavior
-command.push('--build-arg', `BUILD_VERSION=${await getSemver()}`);
+const semver = await getSemver();
+const dockerSemver = semver.replace(/\+/g, '-').replace(/\s/g, '_');
+command.push('--build-arg', `BUILD_VERSION=${semver}`);
 
 await asyncForEach(buildArgs, async (buildArg) => {
   command.push('--build-arg', buildArg);
@@ -106,11 +115,18 @@ await asyncForEach(cacheTo, async (cacheTo) => {
 if (file) {
   command.push('--file', file);
 }
-if (platforms.length > 0) {
-  command.push('--platform', platforms.join(','));
+if (platform) {
+  command.push('--platform', platform);
 }
-await asyncForEach(tags, async (tag) => {
-  command.push('--tag', `${tag}${tagSuffix ?? ''}`);
+
+const arch = platform.split('/')[1];
+
+remotes.forEach((remote) => {
+  command.push('--tag', `${remote}:${dockerSemver}-${arch}`);
+});
+
+tags.forEach((tag) => {
+  command.push('--tag', `${tag}-${arch}${tagSuffix ?? ''}`);
 });
 
 if (push) {
@@ -118,6 +134,6 @@ if (push) {
 }
 
 command.push('.');
-command.push('--progress=plain');
 
+console.log('command: ', command.join(' '));
 await $`${command}`;

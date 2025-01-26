@@ -1,15 +1,24 @@
+import { FieldType } from '@teable/core';
+import type { IFieldInstance } from '../../model';
+import { CellValue } from '../cell-value/CellValue';
 import { CellEditorMain } from './CellEditorMain';
-import { ComputedEditor } from './ComputedEditor';
 import type { ICellValueEditor } from './type';
 
 export const CellEditor = (props: ICellValueEditor) => {
-  const { field, cellValue, wrapStyle, wrapClassName } = props;
-  const { isComputed } = field;
+  const { field, cellValue, readonly, wrapStyle, wrapClassName } = props;
+  const { type, isComputed } = field;
+  const isAttachment = type === FieldType.Attachment;
+  const isRating = type === FieldType.Rating;
 
   return (
     <div style={wrapStyle} className={wrapClassName}>
-      {isComputed ? (
-        <ComputedEditor field={field} cellValue={cellValue} />
+      {(readonly || isComputed) && !isAttachment ? (
+        <CellValue
+          field={field as unknown as IFieldInstance}
+          value={cellValue}
+          className="text-sm"
+          itemClassName={isRating ? 'size-5' : undefined}
+        />
       ) : (
         <CellEditorMain {...props} />
       )}

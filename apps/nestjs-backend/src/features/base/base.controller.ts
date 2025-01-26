@@ -1,5 +1,6 @@
 /* eslint-disable sonarjs/no-duplicate-string */
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import type { IBaseRole } from '@teable/core';
 import {
   createBaseRoSchema,
   duplicateBaseRoSchema,
@@ -11,22 +12,46 @@ import {
   ICreateBaseFromTemplateRo,
   updateOrderRoSchema,
   IUpdateOrderRo,
+  baseQuerySchemaRo,
+  IBaseQuerySchemaRo,
+  createBaseInvitationLinkRoSchema,
+  CreateBaseInvitationLinkRo,
+  updateBaseInvitationLinkRoSchema,
+  emailBaseInvitationRoSchema,
+  updateBaseCollaborateRoSchema,
+  EmailBaseInvitationRo,
+  UpdateBaseCollaborateRo,
+  UpdateBaseInvitationLinkRo,
+  CollaboratorType,
+  listBaseCollaboratorRoSchema,
+  ListBaseCollaboratorRo,
+  deleteBaseCollaboratorRoSchema,
+  DeleteBaseCollaboratorRo,
+  addBaseCollaboratorRoSchema,
+  AddBaseCollaboratorRo,
 } from '@teable/openapi';
 import type {
+  CreateBaseInvitationLinkVo,
+  EmailInvitationVo,
   ICreateBaseVo,
   IDbConnectionVo,
+  IGetBaseAllVo,
   IGetBasePermissionVo,
   IGetBaseVo,
+  IGetSharedBaseVo,
   IUpdateBaseVo,
   ListBaseCollaboratorVo,
+  ListBaseInvitationLinkVo,
+  UpdateBaseInvitationLinkVo,
 } from '@teable/openapi';
 import { EmitControllerEvent } from '../../event-emitter/decorators/emit-controller-event.decorator';
 import { Events } from '../../event-emitter/events';
 import { ZodValidationPipe } from '../../zod.validation.pipe';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { ResourceMeta } from '../auth/decorators/resource_meta.decorator';
-import { TokenAccess } from '../auth/decorators/token.decorator';
 import { CollaboratorService } from '../collaborator/collaborator.service';
+import { InvitationService } from '../invitation/invitation.service';
+import { BaseQueryService } from './base-query/base-query.service';
 import { BaseService } from './base.service';
 import { DbConnectionService } from './db-connection.service';
 
@@ -35,7 +60,9 @@ export class BaseController {
   constructor(
     private readonly baseService: BaseService,
     private readonly dbConnectionService: DbConnectionService,
-    private readonly collaboratorService: CollaboratorService
+    private readonly collaboratorService: CollaboratorService,
+    private readonly baseQueryService: BaseQueryService,
+    private readonly invitationService: InvitationService
   ) {}
 
   @Post()
@@ -91,21 +118,21 @@ export class BaseController {
     return await this.baseService.updateOrder(baseId, updateOrderRo);
   }
 
+  @Get('shared-base')
+  async getSharedBase(): Promise<IGetSharedBaseVo> {
+    return this.collaboratorService.getSharedBase();
+  }
+
   @Permissions('base|read')
   @Get(':baseId')
   async getBaseById(@Param('baseId') baseId: string): Promise<IGetBaseVo> {
     return await this.baseService.getBaseById(baseId);
   }
 
+  @Permissions('base|read_all')
   @Get('access/all')
-  async getAllBase(): Promise<IGetBaseVo[]> {
-    return await this.baseService.getAllBaseList();
-  }
-
-  @Get('access/list')
-  @TokenAccess()
-  async getAccessBase(): Promise<{ id: string; name: string }[]> {
-    return this.baseService.getAccessBaseList();
+  async getAllBase(): Promise<IGetBaseAllVo> {
+    return this.baseService.getAllBaseList();
   }
 
   @Delete(':baseId')
@@ -117,7 +144,7 @@ export class BaseController {
 
   @Permissions('base|db_connection')
   @Post(':baseId/connection')
-  async createDbConnection(@Param('baseId') baseId: string): Promise<IDbConnectionVo> {
+  async createDbConnection(@Param('baseId') baseId: string): Promise<IDbConnectionVo | null> {
     return await this.dbConnectionService.create(baseId);
   }
 
@@ -136,13 +163,137 @@ export class BaseController {
 
   @Permissions('base|read')
   @Get(':baseId/collaborators')
-  async listCollaborator(@Param('baseId') baseId: string): Promise<ListBaseCollaboratorVo> {
-    return await this.collaboratorService.getListByBase(baseId);
+  async listCollaborator(
+    @Param('baseId') baseId: string,
+    @Query(new ZodValidationPipe(listBaseCollaboratorRoSchema)) options: ListBaseCollaboratorRo
+  ): Promise<ListBaseCollaboratorVo> {
+    return {
+      collaborators: await this.collaboratorService.getListByBase(baseId, options),
+      total: await this.collaboratorService.getTotalBase(baseId, options),
+    };
   }
 
   @Permissions('base|read')
   @Get(':baseId/permission')
-  async getPermission(@Param('baseId') baseId: string): Promise<IGetBasePermissionVo> {
-    return await this.baseService.getPermission(baseId);
+  async getPermission(): Promise<IGetBasePermissionVo> {
+    return await this.baseService.getPermission();
+  }
+
+  @Get(':baseId/query')
+  @Permissions('base|query_data')
+  async sqlQuery(
+    @Param('baseId') baseId: string,
+    @Query(new ZodValidationPipe(baseQuerySchemaRo)) query: IBaseQuerySchemaRo
+  ) {
+    return this.baseQueryService.baseQuery(baseId, query.query, query.cellFormat);
+  }
+
+  @Permissions('base|invite_link')
+  @Post(':baseId/invitation/link')
+  async createInvitationLink(
+    @Param('baseId') baseId: string,
+    @Body(new ZodValidationPipe(createBaseInvitationLinkRoSchema))
+    baseInvitationLinkRo: CreateBaseInvitationLinkRo
+  ): Promise<CreateBaseInvitationLinkVo> {
+    const res = await this.invitationService.generateInvitationLink({
+      resourceId: baseId,
+      resourceType: CollaboratorType.Base,
+      role: baseInvitationLinkRo.role,
+    });
+    return {
+      ...res,
+      role: res.role as IBaseRole,
+    };
+  }
+
+  @Permissions('base|invite_link')
+  @Delete(':baseId/invitation/link/:invitationId')
+  async deleteInvitationLink(
+    @Param('baseId') baseId: string,
+    @Param('invitationId') invitationId: string
+  ): Promise<void> {
+    return this.invitationService.deleteInvitationLink({
+      resourceId: baseId,
+      resourceType: CollaboratorType.Base,
+      invitationId,
+    });
+  }
+
+  @Permissions('base|invite_link')
+  @Patch(':baseId/invitation/link/:invitationId')
+  async updateInvitationLink(
+    @Param('baseId') baseId: string,
+    @Param('invitationId') invitationId: string,
+    @Body(new ZodValidationPipe(updateBaseInvitationLinkRoSchema))
+    updateSpaceInvitationLinkRo: UpdateBaseInvitationLinkRo
+  ): Promise<UpdateBaseInvitationLinkVo> {
+    const res = await this.invitationService.updateInvitationLink({
+      resourceId: baseId,
+      resourceType: CollaboratorType.Base,
+      invitationId,
+      role: updateSpaceInvitationLinkRo.role,
+    });
+
+    return {
+      ...res,
+      role: res.role as IBaseRole,
+    };
+  }
+
+  @Permissions('base|invite_link')
+  @Get(':baseId/invitation/link')
+  async listInvitationLink(@Param('baseId') baseId: string): Promise<ListBaseInvitationLinkVo> {
+    const res = this.invitationService.getInvitationLink(baseId, CollaboratorType.Base);
+    return res as unknown as ListBaseInvitationLinkVo;
+  }
+
+  @Permissions('base|invite_email')
+  @Post(':baseId/invitation/email')
+  async emailInvitation(
+    @Param('baseId') baseId: string,
+    @Body(new ZodValidationPipe(emailBaseInvitationRoSchema))
+    emailBaseInvitationRo: EmailBaseInvitationRo
+  ): Promise<EmailInvitationVo> {
+    return this.invitationService.emailInvitationByBase(baseId, emailBaseInvitationRo);
+  }
+
+  @Patch(':baseId/collaborators')
+  async updateCollaborator(
+    @Param('baseId') baseId: string,
+    @Body(new ZodValidationPipe(updateBaseCollaborateRoSchema))
+    updateBaseCollaborateRo: UpdateBaseCollaborateRo
+  ): Promise<void> {
+    await this.collaboratorService.updateCollaborator({
+      resourceId: baseId,
+      resourceType: CollaboratorType.Base,
+      ...updateBaseCollaborateRo,
+    });
+  }
+
+  @Delete(':baseId/collaborators')
+  async deleteCollaborator(
+    @Param('baseId') baseId: string,
+    @Query(new ZodValidationPipe(deleteBaseCollaboratorRoSchema))
+    deleteBaseCollaboratorRo: DeleteBaseCollaboratorRo
+  ): Promise<void> {
+    await this.collaboratorService.deleteCollaborator({
+      resourceId: baseId,
+      resourceType: CollaboratorType.Base,
+      ...deleteBaseCollaboratorRo,
+    });
+  }
+
+  @Delete(':baseId/permanent')
+  async permanentDeleteBase(@Param('baseId') baseId: string) {
+    return await this.baseService.permanentDeleteBase(baseId);
+  }
+
+  @Post(':baseId/collaborator')
+  async addCollaborators(
+    @Param('baseId') baseId: string,
+    @Body(new ZodValidationPipe(addBaseCollaboratorRoSchema))
+    addBaseCollaboratorRo: AddBaseCollaboratorRo
+  ) {
+    return await this.collaboratorService.addBaseCollaborators(baseId, addBaseCollaboratorRo);
   }
 }

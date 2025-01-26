@@ -1,16 +1,32 @@
+import type { DragEndEvent } from '@dnd-kit/core';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  rectSortingStrategy,
+  SortableContext,
+  sortableKeyboardCoordinates,
+} from '@dnd-kit/sortable';
 import type { IAttachmentItem, IAttachmentCellValue } from '@teable/core';
 import { generateAttachmentId } from '@teable/core';
-import { X, Download } from '@teable/icons';
 import { UploadType, type INotifyVo } from '@teable/openapi';
-import { Button, FilePreviewItem, FilePreviewProvider, Progress, cn } from '@teable/ui-lib';
+import { FilePreviewProvider, Progress, cn } from '@teable/ui-lib';
 import { toast } from '@teable/ui-lib/src/shadcn/ui/sonner';
 import { map, omit } from 'lodash';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from '../../../../context/app/i18n';
-import { useBase } from '../../../../hooks';
+import { useBaseId } from '../../../../hooks';
 import { UsageLimitModalType, useUsageLimitModalStore } from '../../../billing/store';
 import { FileZone } from '../../../FileZone';
-import { getFileCover, isSystemFileIcon } from '../utils';
+import { useAttachmentPreviewI18Map } from '../../../hooks';
+import { getFileCover } from '../utils';
+import AttachmentItem from './AttachmentItem';
 import { FileInput } from './FileInput';
 import type { IFile } from './uploadManage';
 import { AttachmentManager } from './uploadManage';
@@ -35,12 +51,24 @@ export const UploadAttachment = (props: IUploadAttachment) => {
     readonly,
     attachmentManager = defaultAttachmentManager,
   } = props;
-  const base = useBase();
+  const baseId = useBaseId();
+  const [sortData, setSortData] = useState([...attachments]);
   const [uploadingFiles, setUploadingFiles] = useState<IUploadFileMap>({});
   const listRef = useRef<HTMLDivElement>(null);
   const attachmentsRef = useRef<IAttachmentCellValue>(attachments);
   const [newAttachments, setNewAttachments] = useState<IAttachmentCellValue>([]);
   const { t } = useTranslation();
+  const i18nMap = useAttachmentPreviewI18Map();
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
   attachmentsRef.current = attachments;
 
   useEffect(() => {
@@ -104,14 +132,14 @@ export const UploadAttachment = (props: IUploadAttachment) => {
             setUploadingFiles((pre) => ({ ...pre, [file.id]: { progress, file: file.instance } }));
           },
         },
-        base?.id
+        baseId
       );
       setUploadingFiles((pre) => ({ ...pre, ...newUploadMap }));
       setTimeout(() => {
         scrollBottom();
       }, 100);
     },
-    [attachmentManager, base?.id, handleSuccess, t, uploadingFiles]
+    [attachmentManager, baseId, handleSuccess, t, uploadingFiles]
   );
 
   const scrollBottom = () => {
@@ -127,80 +155,70 @@ export const UploadAttachment = (props: IUploadAttachment) => {
     return attachments.length + Object.keys(uploadingFiles).length;
   }, [attachments, uploadingFiles]);
 
-  const fileCover = useCallback(({ mimetype, presignedUrl }: IAttachmentItem) => {
+  const fileCover = useCallback(({ mimetype, presignedUrl, lgThumbnailUrl }: IAttachmentItem) => {
     if (!presignedUrl) return '';
-    return getFileCover(mimetype, presignedUrl);
+    return lgThumbnailUrl ?? getFileCover(mimetype, presignedUrl);
   }, []);
 
   const uploadingFilesList = map(uploadingFiles, (value, key) => ({ id: key, ...value }));
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      setSortData((sortData) => {
+        const oldIndex = sortData.findIndex((item) => item.id === active.id);
+        const newIndex = sortData.findIndex((item) => item.id === over.id);
+
+        if (oldIndex !== -1 && newIndex !== -1) {
+          onChange?.(arrayMove(sortData, oldIndex, newIndex));
+          return arrayMove(sortData, oldIndex, newIndex);
+        }
+        return sortData;
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (attachments && attachments.length) {
+      setSortData([...attachments]);
+    }
+  }, [attachments]);
 
   return (
     <div className={cn('flex h-full flex-col overflow-hidden', className)}>
       <div className="relative flex-1 overflow-y-auto" ref={listRef}>
         <FileZone
           action={['drop', 'paste']}
-          defaultText={t('editor.attachment.uploadDragDefault')}
+          defaultText={readonly ? t('common.empty') : t('editor.attachment.uploadDragDefault')}
           onChange={uploadAttachment}
           disabled={readonly}
         >
           {len > 0 && (
-            <ul className="-right-2 flex size-full flex-wrap">
-              <FilePreviewProvider>
-                {attachments.map((attachment) => (
-                  <li key={attachment.id} className="mb-2 flex h-32 w-28 flex-col pr-3">
-                    <div
-                      className={cn(
-                        'group relative flex-1 cursor-pointer overflow-hidden rounded-md border border-border',
-                        {
-                          'border-none': isSystemFileIcon(attachment.mimetype),
-                        }
-                      )}
-                    >
-                      <FilePreviewItem
-                        className="flex items-center justify-center"
-                        src={attachment.presignedUrl || ''}
-                        name={attachment.name}
-                        mimetype={attachment.mimetype}
-                        size={attachment.size}
-                      >
-                        <img
-                          className="size-full object-contain"
-                          src={fileCover(attachment)}
-                          alt={attachment.name}
-                        />
-                      </FilePreviewItem>
-                      <ul className="absolute right-0 top-0 hidden w-full justify-end space-x-1 bg-black/40 p-1 group-hover:flex">
-                        {/* <li>
-                      <button className="btn btn-xs btn-circle bg-neutral/50 border-none">
-                        <FullscreenIcon />
-                      </button>
-                    </li> */}
-                        <li>
-                          <Button
-                            variant={'ghost'}
-                            className="size-5 rounded-full p-0 text-white focus-visible:ring-transparent focus-visible:ring-offset-0"
-                            onClick={() => downloadFile(attachment)}
-                          >
-                            <Download />
-                          </Button>
-                        </li>
-                        <li>
-                          <Button
-                            variant={'ghost'}
-                            className="size-5 rounded-full p-0 text-white focus-visible:ring-transparent focus-visible:ring-offset-0"
-                            onClick={() => onDelete(attachment.id)}
-                            disabled={readonly}
-                          >
-                            <X />
-                          </Button>
-                        </li>
-                      </ul>
-                    </div>
-                    <span className="mt-1 w-full truncate text-center" title={attachment.name}>
-                      {attachment.name}
-                    </span>
-                  </li>
-                ))}
+            <ul className="-right-2 flex size-full flex-wrap overflow-hidden">
+              <FilePreviewProvider i18nMap={i18nMap}>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext
+                    items={sortData}
+                    disabled={readonly}
+                    strategy={rectSortingStrategy}
+                  >
+                    {sortData.map((attachment) => (
+                      <AttachmentItem
+                        key={attachment.id}
+                        attachment={attachment}
+                        onDelete={onDelete}
+                        downloadFile={downloadFile}
+                        fileCover={fileCover}
+                        readonly={readonly}
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
               </FilePreviewProvider>
               {uploadingFilesList.map(({ id, progress, file }) => (
                 <li key={id} className="mb-2 flex h-32 w-28 flex-col pr-3">

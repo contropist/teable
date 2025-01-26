@@ -1,8 +1,6 @@
-import { FieldType } from '@teable/core';
 import { ArrowUpDown, Filter as FilterIcon, Layers } from '@teable/icons';
 import type { KanbanView } from '@teable/sdk';
-import { Filter, useFields } from '@teable/sdk';
-import { FilterLink } from '@teable/sdk/components/filter/component';
+import { useFields } from '@teable/sdk';
 import { useView } from '@teable/sdk/hooks/use-view';
 import { cn } from '@teable/ui-lib/shadcn';
 import { Trans } from 'next-i18next';
@@ -10,8 +8,8 @@ import { useMemo } from 'react';
 import { useToolbarChange } from '@/features/app/blocks/view/hooks/useToolbarChange';
 import { SearchButton } from '@/features/app/blocks/view/search/SearchButton';
 import { ToolBarButton } from '@/features/app/blocks/view/tool-bar/ToolBarButton';
-import { FilterUser } from '../../grid/toolbar/FilterUser';
 import { Sort } from '../../grid/toolbar/Sort';
+import { ShareViewFilter } from '../../share-view-filter';
 
 export const KanbanToolbar: React.FC<{ disabled?: boolean }> = (props) => {
   const { disabled } = props;
@@ -19,7 +17,6 @@ export const KanbanToolbar: React.FC<{ disabled?: boolean }> = (props) => {
   const allFields = useFields({ withHidden: true, withDenied: true });
   const { onFilterChange, onSortChange } = useToolbarChange();
   const { stackFieldId } = view?.options ?? {};
-
   const stackFieldName = useMemo(() => {
     if (stackFieldId == null) return '';
     const groupField = allFields.find(({ id }) => id === stackFieldId);
@@ -41,14 +38,7 @@ export const KanbanToolbar: React.FC<{ disabled?: boolean }> = (props) => {
       >
         <Layers className="size-4 text-sm" />
       </ToolBarButton>
-      <Filter
-        components={{
-          [FieldType.User]: FilterUser,
-          [FieldType.Link]: FilterLink,
-        }}
-        filters={view?.filter || null}
-        onChange={onFilterChange}
-      >
+      <ShareViewFilter filters={view?.filter || null} onChange={onFilterChange}>
         {(text, isActive) => (
           <ToolBarButton
             disabled={disabled}
@@ -64,7 +54,7 @@ export const KanbanToolbar: React.FC<{ disabled?: boolean }> = (props) => {
             <FilterIcon className="size-4 text-sm" />
           </ToolBarButton>
         )}
-      </Filter>
+      </ShareViewFilter>
       <Sort sorts={view?.sort || null} onChange={onSortChange}>
         {(text: string, isActive) => (
           <ToolBarButton
@@ -82,7 +72,7 @@ export const KanbanToolbar: React.FC<{ disabled?: boolean }> = (props) => {
         )}
       </Sort>
       <div className="flex w-10 flex-1 justify-end">
-        <SearchButton />
+        <SearchButton shareView />
       </div>
     </div>
   );

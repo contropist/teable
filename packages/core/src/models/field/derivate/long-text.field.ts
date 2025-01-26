@@ -2,7 +2,14 @@ import { z } from 'zod';
 import type { CellValueType, FieldType } from '../constant';
 import { FieldCore } from '../field';
 
-export const longTextFieldOptionsSchema = z.object({}).strict();
+export const longTextFieldOptionsSchema = z
+  .object({
+    defaultValue: z
+      .string()
+      .optional()
+      .transform((value) => (typeof value === 'string' ? value.trim() : value)),
+  })
+  .strict();
 
 export type ILongTextFieldOptions = z.infer<typeof longTextFieldOptionsSchema>;
 
@@ -41,7 +48,7 @@ export class LongTextFieldCore extends FieldCore {
       return null;
     }
 
-    return value;
+    return value.trim();
   }
 
   repair(value: unknown) {

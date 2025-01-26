@@ -1,9 +1,14 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 import type { INestApplication } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import type { HttpError } from '@teable/core';
-import { IdPrefix, SpaceRole } from '@teable/core';
-import type { ListSpaceCollaboratorVo, ListSpaceInvitationLinkVo } from '@teable/openapi';
+import { getPluginEmail, IdPrefix, Role } from '@teable/core';
+import type {
+  ICreateSpaceVo,
+  IUserMeVo,
+  ListSpaceCollaboratorVo,
+  ListSpaceInvitationLinkVo,
+  UserCollaboratorItem,
+} from '@teable/openapi';
 import {
   createSpace as apiCreateSpace,
   createSpaceInvitationLink as apiCreateSpaceInvitationLink,
@@ -18,10 +23,31 @@ import {
   listSpaceInvitationLink as apiListSpaceInvitationLink,
   updateSpace as apiUpdateSpace,
   updateSpaceInvitationLink as apiUpdateSpaceInvitationLink,
+  CREATE_SPACE,
+  EMAIL_SPACE_INVITATION,
+  urlBuilder,
+  listSpaceInvitationLink,
+  updateSpaceCollaborator,
+  USER_ME,
+  deleteSpaceCollaborator,
+  createBase,
+  emailBaseInvitation,
+  emailSpaceInvitation,
+  getBaseCollaboratorList,
+  CollaboratorType,
+  getSpaceCollaboratorList,
+  deleteBase,
+  UPDATE_SPACE_COLLABORATE,
+  DELETE_SPACE_COLLABORATOR,
+  PrincipalType,
+  PERMANENT_DELETE_SPACE,
 } from '@teable/openapi';
+import type { AxiosInstance } from 'axios';
 import { Events } from '../src/event-emitter/events';
 import type { SpaceDeleteEvent, SpaceUpdateEvent } from '../src/event-emitter/events';
+import { chartConfig } from '../src/features/plugin/official/config/chart';
 import { createNewUserAxios } from './utils/axios-instance/new-user';
+import { getError } from './utils/get-error';
 import { initApp } from './utils/init-app';
 
 describe('OpenAPI SpaceController (e2e)', () => {
@@ -85,90 +111,364 @@ describe('OpenAPI SpaceController (e2e)', () => {
     });
 
     const newSpaceRes = await apiCreateSpace({ name: 'delete space' });
-    expect((await apiDeleteSpace(newSpaceRes.data.id)).status).toEqual(200);
-
-    try {
-      await apiDeleteSpace(newSpaceRes.data.id);
-    } catch (error) {
-      if ((error as HttpError).status !== 403) {
-        throw error;
-      }
-    }
+    const res = await apiDeleteSpace(newSpaceRes.data.id);
+    expect(res.status).toEqual(200);
+    const error = await getError(() => apiDeleteSpace(newSpaceRes.data.id));
+    expect(error?.status).toEqual(404);
   });
 
   it('/api/space/:spaceId/collaborators (GET)', async () => {
-    const collaborators: ListSpaceCollaboratorVo = (await apiGetSpaceCollaboratorList(spaceId))
-      .data;
+    const { collaborators, total } = (await apiGetSpaceCollaboratorList(spaceId)).data;
     expect(collaborators).toHaveLength(1);
+    expect(total).toBe(1);
   });
 
-  describe('Space Invitation', () => {
-    const newUserEmail = 'newuser@example.com';
+  it('/api/space/:spaceId/collaborators (GET) - includeSystem', async () => {
+    const base = await createBase({ spaceId, name: 'new base' });
+    await emailBaseInvitation({
+      baseId: base.data.id,
+      emailBaseInvitationRo: { emails: [getPluginEmail(chartConfig.id)], role: Role.Creator },
+    });
+    const { collaborators } = (
+      await apiGetSpaceCollaboratorList(spaceId, { includeSystem: true, includeBase: true })
+    ).data;
+    await deleteBase(base.data.id);
+    expect(collaborators).toHaveLength(2);
+  });
 
+  it('/api/space/:spaceId/collaborators (GET) - includeBase', async () => {
+    const base = await createBase({ spaceId, name: 'new base' });
+    await emailBaseInvitation({
+      baseId: base.data.id,
+      emailBaseInvitationRo: { emails: ['space-coll-base@example.com'], role: Role.Creator },
+    });
+    const collaborators: ListSpaceCollaboratorVo = (
+      await apiGetSpaceCollaboratorList(spaceId, { includeBase: true })
+    ).data;
+    await deleteBase(base.data.id);
+    expect(collaborators.collaborators).toHaveLength(2);
+    expect(collaborators.total).toBe(2);
+  });
+
+  it('/api/space/:spaceId/collaborators (GET) - pagination', async () => {
+    const base = await createBase({ spaceId, name: 'new base' });
+    await emailBaseInvitation({
+      baseId: base.data.id,
+      emailBaseInvitationRo: { emails: ['space-coll-base@example.com'], role: Role.Creator },
+    });
+    const collaborators: ListSpaceCollaboratorVo = (
+      await apiGetSpaceCollaboratorList(spaceId, { includeBase: true, skip: 1, take: 1 })
+    ).data;
+    await deleteBase(base.data.id);
+    expect(collaborators.collaborators).toHaveLength(1);
+    expect(collaborators.total).toBe(2);
+  });
+
+  it('/api/space/:spaceId/collaborators (GET) - search', async () => {
+    const base = await createBase({ spaceId, name: 'new base' });
+    await emailBaseInvitation({
+      baseId: base.data.id,
+      emailBaseInvitationRo: { emails: ['space-coll-base@example.com'], role: Role.Creator },
+    });
+    const collaborators: ListSpaceCollaboratorVo = (
+      await apiGetSpaceCollaboratorList(spaceId, { includeBase: true, search: 'space-coll-base' })
+    ).data;
+    await deleteBase(base.data.id);
+    expect(collaborators.collaborators).toHaveLength(1);
+    expect((collaborators.collaborators[0] as UserCollaboratorItem).email).toBe(
+      'space-coll-base@example.com'
+    );
+    expect(collaborators.total).toBe(1);
+  });
+
+  describe('Space Invitation and operator collaborators', () => {
+    const newUserEmail = 'newuser@example.com';
+    const newUser3Email = 'newuser2@example.com';
+
+    let userRequest: AxiosInstance;
+    let userRequestId: string;
+    let user3Request: AxiosInstance;
+    let space2Id: string;
     beforeEach(async () => {
-      await createNewUserAxios({
+      user3Request = await createNewUserAxios({
+        email: newUser3Email,
+        password: '12345678',
+      });
+      userRequest = await createNewUserAxios({
         email: newUserEmail,
         password: '12345678',
       });
+      userRequestId = (await userRequest.get<IUserMeVo>(USER_ME)).data.id;
+      const res = await userRequest.post<ICreateSpaceVo>(CREATE_SPACE, {
+        name: 'new space',
+      });
+      space2Id = res.data.id;
+      await userRequest.post(urlBuilder(EMAIL_SPACE_INVITATION, { spaceId: space2Id }), {
+        emails: [globalThis.testConfig.email],
+        role: Role.Creator,
+      });
+    });
+
+    afterEach(async () => {
+      await userRequest.delete<null>(
+        urlBuilder(PERMANENT_DELETE_SPACE, {
+          spaceId: space2Id,
+        })
+      );
     });
 
     it('/api/space/:spaceId/invitation/link (POST)', async () => {
       const res = await apiCreateSpaceInvitationLink({
-        spaceId,
-        createSpaceInvitationLinkRo: { role: SpaceRole.Owner },
+        spaceId: space2Id,
+        createSpaceInvitationLinkRo: { role: Role.Creator },
       });
-
       expect(createSpaceInvitationLinkVoSchema.safeParse(res.data).success).toEqual(true);
+
+      const linkList = await listSpaceInvitationLink(space2Id);
+      expect(linkList.data).toHaveLength(1);
+    });
+
+    it('/api/space/{spaceId}/invitation/link (POST) - exceeds limit role', async () => {
+      const error = await getError(() =>
+        apiCreateSpaceInvitationLink({
+          spaceId: space2Id,
+          createSpaceInvitationLinkRo: { role: Role.Owner },
+        })
+      );
+      expect(error?.status).toBe(403);
     });
 
     it('/api/space/:spaceId/invitation/link/:invitationId (PATCH)', async () => {
       const res = await apiCreateSpaceInvitationLink({
         spaceId,
-        createSpaceInvitationLinkRo: { role: SpaceRole.Owner },
+        createSpaceInvitationLinkRo: { role: Role.Editor },
       });
       const newInvitationId = res.data.invitationId;
 
       const newSpaceUpdate = await apiUpdateSpaceInvitationLink({
         spaceId,
         invitationId: newInvitationId,
-        updateSpaceInvitationLinkRo: { role: SpaceRole.Editor },
+        updateSpaceInvitationLinkRo: { role: Role.Editor },
       });
-      expect(newSpaceUpdate.data.role).toEqual(SpaceRole.Editor);
+      expect(newSpaceUpdate.data.role).toEqual(Role.Editor);
+    });
 
-      await apiDeleteSpaceInvitationLink({ spaceId, invitationId: newInvitationId });
+    it('/api/space/:spaceId/invitation/link/:invitationId (PATCH) - exceeds limit role', async () => {
+      const res = await apiCreateSpaceInvitationLink({
+        spaceId: space2Id,
+        createSpaceInvitationLinkRo: { role: Role.Editor },
+      });
+      const newInvitationId = res.data.invitationId;
+
+      const error = await getError(() =>
+        apiUpdateSpaceInvitationLink({
+          spaceId: space2Id,
+          invitationId: newInvitationId,
+          updateSpaceInvitationLinkRo: { role: Role.Owner },
+        })
+      );
+      expect(error?.status).toBe(403);
     });
 
     it('/api/space/:spaceId/invitation/link (GET)', async () => {
-      const res = await apiGetSpaceCollaboratorList(spaceId);
-      expect(res.data.length > 0).toEqual(true);
+      const res = await apiGetSpaceCollaboratorList(space2Id);
+      expect(res.data.collaborators).toHaveLength(2);
     });
 
     it('/api/space/:spaceId/invitation/link/:invitationId (DELETE)', async () => {
       const res = await apiCreateSpaceInvitationLink({
-        spaceId,
-        createSpaceInvitationLinkRo: { role: SpaceRole.Owner },
+        spaceId: space2Id,
+        createSpaceInvitationLinkRo: { role: Role.Editor },
       });
       const newInvitationId = res.data.invitationId;
 
-      await apiDeleteSpaceInvitationLink({ spaceId, invitationId: newInvitationId });
+      await apiDeleteSpaceInvitationLink({ spaceId: space2Id, invitationId: newInvitationId });
 
-      const list: ListSpaceInvitationLinkVo = (await apiListSpaceInvitationLink(spaceId)).data;
-      expect(list.findIndex((v) => v.invitationId === newInvitationId) < 0).toEqual(true);
+      const list: ListSpaceInvitationLinkVo = (await apiListSpaceInvitationLink(space2Id)).data;
+      expect(list.find((v) => v.invitationId === newInvitationId)).toBeUndefined();
     });
 
     it('/api/space/:spaceId/invitation/email (POST)', async () => {
       await apiEmailSpaceInvitation({
-        spaceId,
-        emailSpaceInvitationRo: { role: SpaceRole.Owner, emails: [newUserEmail] },
+        spaceId: space2Id,
+        emailSpaceInvitationRo: { role: Role.Creator, emails: [newUser3Email] },
       });
 
-      const collaborators: ListSpaceCollaboratorVo = (await apiGetSpaceCollaboratorList(spaceId))
-        .data;
+      const { collaborators } = (await apiGetSpaceCollaboratorList(space2Id)).data;
 
-      const newCollaboratorInfo = collaborators.find(({ email }) => email === newUserEmail);
+      const newCollaboratorInfo = (collaborators as UserCollaboratorItem[]).find(
+        ({ email }) => email === newUser3Email
+      );
 
       expect(newCollaboratorInfo).not.toBeUndefined();
-      expect(newCollaboratorInfo?.role).toEqual(SpaceRole.Owner);
+      expect(newCollaboratorInfo?.role).toEqual(Role.Creator);
+    });
+
+    it('/api/space/:spaceId/invitation/email (POST) - exceeds limit role', async () => {
+      const error = await getError(() =>
+        apiEmailSpaceInvitation({
+          spaceId: space2Id,
+          emailSpaceInvitationRo: { emails: [newUser3Email], role: Role.Owner },
+        })
+      );
+      expect(error?.status).toBe(403);
+    });
+
+    it('/api/space/:spaceId/invitation/email (POST) - not exist email', async () => {
+      await apiEmailSpaceInvitation({
+        spaceId: space2Id,
+        emailSpaceInvitationRo: { emails: ['not.exist@email.com'], role: Role.Creator },
+      });
+      const { collaborators } = (await apiGetSpaceCollaboratorList(space2Id)).data;
+      expect(collaborators).toHaveLength(3);
+    });
+
+    it('/api/space/:spaceId/invitation/email (POST) - user in base', async () => {
+      const base = await createBase({ spaceId: space2Id, name: 'new base' });
+      await emailBaseInvitation({
+        baseId: base.data.id,
+        emailBaseInvitationRo: {
+          emails: [newUser3Email],
+          role: Role.Editor,
+        },
+      });
+      const baseColl = await getBaseCollaboratorList(base.data.id);
+      const spaceColl = await getSpaceCollaboratorList(space2Id);
+      expect(spaceColl.data.collaborators).toHaveLength(2);
+      expect(baseColl.data.collaborators).toHaveLength(3);
+      expect(
+        (baseColl.data.collaborators as UserCollaboratorItem[]).find(
+          (v) => v.email === newUser3Email
+        )?.resourceType
+      ).toEqual(CollaboratorType.Base);
+
+      await emailSpaceInvitation({
+        spaceId: space2Id,
+        emailSpaceInvitationRo: {
+          emails: [newUser3Email],
+          role: Role.Editor,
+        },
+      });
+      const newBaseColl = await getBaseCollaboratorList(base.data.id);
+      const newSpaceColl = await getSpaceCollaboratorList(space2Id);
+      expect(newSpaceColl.data.collaborators).toHaveLength(3);
+      expect(newBaseColl.data.collaborators).toHaveLength(3);
+      expect(
+        (newBaseColl.data.collaborators as UserCollaboratorItem[]).find(
+          (v) => v.email === newUser3Email
+        )?.resourceType
+      ).toEqual(CollaboratorType.Space);
+    });
+
+    describe('operator collaborators', () => {
+      let newUser3Id: string;
+      beforeEach(async () => {
+        await userRequest.post(urlBuilder(EMAIL_SPACE_INVITATION, { spaceId: space2Id }), {
+          emails: [newUser3Email],
+          role: Role.Editor,
+        });
+        const res = await user3Request.get<IUserMeVo>(USER_ME);
+        newUser3Id = res.data.id;
+      });
+
+      it('/api/space/:spaceId/collaborators (PATCH)', async () => {
+        const res = await updateSpaceCollaborator({
+          spaceId: space2Id,
+          updateSpaceCollaborateRo: {
+            role: Role.Creator,
+            principalId: newUser3Id,
+            principalType: PrincipalType.User,
+          },
+        });
+        expect(res.status).toBe(200);
+      });
+
+      it('/api/space/:spaceId/collaborators (PATCH) - exceeds limit role', async () => {
+        const error = await getError(() =>
+          updateSpaceCollaborator({
+            spaceId: space2Id,
+            updateSpaceCollaborateRo: {
+              role: Role.Owner,
+              principalId: newUser3Id,
+              principalType: PrincipalType.User,
+            },
+          })
+        );
+        expect(error?.status).toBe(403);
+      });
+
+      it('/api/space/:spaceId/collaborators (PATCH) - last owner', async () => {
+        const error = await getError(() =>
+          userRequest.patch<void>(
+            urlBuilder(UPDATE_SPACE_COLLABORATE, {
+              spaceId: space2Id,
+            }),
+            {
+              role: Role.Editor,
+              principalId: userRequestId,
+              principalType: PrincipalType.User,
+            }
+          )
+        );
+        expect(error?.status).toBe(400);
+        expect(error?.message).toBe('Cannot change the role of the only owner of the space');
+      });
+
+      it('/api/space/:spaceId/collaborators (DELETE)', async () => {
+        const res = await deleteSpaceCollaborator({
+          spaceId: space2Id,
+          deleteSpaceCollaboratorRo: {
+            principalId: newUser3Id,
+            principalType: PrincipalType.User,
+          },
+        });
+        expect(res.status).toBe(200);
+        const collList = await apiGetSpaceCollaboratorList(space2Id);
+        expect(collList.data.collaborators).toHaveLength(2);
+      });
+
+      it('/api/space/:spaceId/collaborators (DELETE) - exceeds limit role', async () => {
+        await updateSpaceCollaborator({
+          spaceId: space2Id,
+          updateSpaceCollaborateRo: {
+            role: Role.Creator,
+            principalId: newUser3Id,
+            principalType: PrincipalType.User,
+          },
+        });
+        const error = await getError(() =>
+          deleteSpaceCollaborator({
+            spaceId: space2Id,
+            deleteSpaceCollaboratorRo: {
+              principalId: newUser3Id,
+              principalType: PrincipalType.User,
+            },
+          })
+        );
+        expect(error?.status).toBe(403);
+      });
+
+      it('/api/space/:spaceId/collaborators (DELETE) - self', async () => {
+        await deleteSpaceCollaborator({
+          spaceId: space2Id,
+          deleteSpaceCollaboratorRo: {
+            principalId: globalThis.testConfig.userId,
+            principalType: PrincipalType.User,
+          },
+        });
+        const error = await getError(() => apiGetSpaceCollaboratorList(space2Id));
+        expect(error?.status).toBe(403);
+      });
+
+      it('/api/space/:spaceId/collaborators (DELETE) - last owner', async () => {
+        const error = await getError(() =>
+          userRequest.delete(urlBuilder(DELETE_SPACE_COLLABORATOR, { spaceId: space2Id }), {
+            params: { principalId: userRequestId, principalType: PrincipalType.User },
+          })
+        );
+        expect(error?.status).toBe(400);
+        expect(error?.message).toBe('Cannot delete the only owner of the space');
+      });
     });
   });
 });

@@ -2,7 +2,7 @@ import {
   BadRequestException,
   Injectable,
   InternalServerErrorException,
-  NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { IDsn } from '@teable/core';
@@ -12,17 +12,16 @@ import type { IDbConnectionVo } from '@teable/openapi';
 import { Knex } from 'knex';
 import { nanoid } from 'nanoid';
 import { InjectModel } from 'nest-knexjs';
-import { ClsService } from 'nestjs-cls';
 import { BaseConfig, type IBaseConfig } from '../../configs/base.config';
 import { InjectDbProvider } from '../../db-provider/db.provider';
 import { IDbProvider } from '../../db-provider/db.provider.interface';
-import type { IClsStore } from '../../types/cls';
 
 @Injectable()
 export class DbConnectionService {
+  private readonly logger = new Logger(DbConnectionService.name);
+
   constructor(
     private readonly prismaService: PrismaService,
-    private readonly cls: ClsService<IClsStore>,
     private readonly configService: ConfigService,
     @InjectDbProvider() private readonly dbProvider: IDbProvider,
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex,
@@ -44,7 +43,6 @@ export class DbConnectionService {
   }
 
   async remove(baseId: string) {
-    const userId = this.cls.get('user.id'); // Assuming you have some user context
     if (this.dbProvider.driver !== DriverClient.Pg) {
       throw new BadRequestException(`Unsupported database driver: ${this.dbProvider.driver}`);
     }
@@ -55,7 +53,7 @@ export class DbConnectionService {
       // Verify if the base exists and if the user is the owner
       await prisma.base
         .findFirstOrThrow({
-          where: { id: baseId, createdBy: userId, deletedTime: null }, // TODO: change it to owner check
+          where: { id: baseId, deletedTime: null },
         })
         .catch(() => {
           throw new BadRequestException('Only the base owner can remove a db connection');
@@ -119,7 +117,8 @@ export class DbConnectionService {
     const readOnlyRole = `read_only_role_${baseId}`;
     const publicDatabaseProxy = this.baseConfig.publicDatabaseProxy;
     if (!publicDatabaseProxy) {
-      throw new NotFoundException('PUBLIC_DATABASE_PROXY is not found in env');
+      this.logger.error('PUBLIC_DATABASE_PROXY is not found in env');
+      return null;
     }
 
     const { hostname: dbHostProxy, port: dbPortProxy } = new URL(`https://${publicDatabaseProxy}`);
@@ -180,14 +179,14 @@ export class DbConnectionService {
    * limit role to only access the schema
    */
   async create(baseId: string) {
-    const userId = this.cls.get('user.id');
     if (this.dbProvider.driver === DriverClient.Pg) {
       const readOnlyRole = `read_only_role_${baseId}`;
       const schemaName = baseId;
       const password = nanoid();
       const publicDatabaseProxy = this.baseConfig.publicDatabaseProxy;
       if (!publicDatabaseProxy) {
-        throw new NotFoundException('PUBLIC_DATABASE_PROXY is not found in env');
+        this.logger.error('PUBLIC_DATABASE_PROXY is not found in env');
+        return null;
       }
 
       const { hostname: dbHostProxy, port: dbPortProxy } = new URL(
@@ -199,7 +198,7 @@ export class DbConnectionService {
       return this.prismaService.$tx(async (prisma) => {
         await prisma.base
           .findFirstOrThrow({
-            where: { id: baseId, createdBy: userId, deletedTime: null }, // TODO: change it to owner check
+            where: { id: baseId, deletedTime: null },
           })
           .catch(() => {
             throw new BadRequestException('only base owner can public db connection');

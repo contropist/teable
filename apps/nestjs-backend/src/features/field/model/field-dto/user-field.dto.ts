@@ -27,10 +27,10 @@ export class UserFieldDto extends UserFieldCore implements FieldBase {
 
     const parsedValue: IUserCellValue | IUserCellValue[] =
       typeof value === 'string' ? JSON.parse(value) : value;
-    return this.applyTransformation<IUserCellValue>(parsedValue, this.fullAvatarUrl);
+    return this.applyTransformation<IUserCellValue>(parsedValue, UserFieldDto.fullAvatarUrl);
   }
 
-  private fullAvatarUrl(cellValue: IUserCellValue) {
+  static fullAvatarUrl(cellValue: IUserCellValue) {
     if (cellValue?.id) {
       const bucket = StorageAdapter.getBucket(UploadType.Avatar);
       const path = `${StorageAdapter.getDir(UploadType.Avatar)}/${cellValue.id}`;
@@ -40,7 +40,7 @@ export class UserFieldDto extends UserFieldCore implements FieldBase {
     return cellValue;
   }
 
-  private applyTransformation<T>(value: T | T[], transform: (item: T) => void): T | T[] {
+  applyTransformation<T>(value: T | T[], transform: (item: T) => void): T | T[] {
     if (Array.isArray(value)) {
       value.forEach(transform);
     } else {

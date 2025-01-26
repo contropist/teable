@@ -1,4 +1,3 @@
-import type { ISelectFieldChoice, IUserCellValue } from '@teable/core';
 import { FieldType } from '@teable/core';
 import type { IFieldInstance, Record as IRecord } from '@teable/sdk/model';
 import { UNCATEGORIZED_STACK_ID } from '../constant';
@@ -25,6 +24,8 @@ export const FIELD_HEIGHT_MAP: { [key in FieldType]?: number } = {
   [FieldType.MultipleSelect]: 24,
   [FieldType.Link]: 24,
   [FieldType.User]: 24,
+  [FieldType.CreatedBy]: 24,
+  [FieldType.LastModifiedBy]: 24,
   [FieldType.Rating]: 16,
 };
 
@@ -54,14 +55,12 @@ export const getCardHeight = (
   return staticHeight + dynamicHeight;
 };
 
-export const getCellValueByStack = (fieldType: FieldType, stack: IStackData) => {
+export const getCellValueByStack = (stack: IStackData) => {
   const { id, data } = stack;
 
   if (id === UNCATEGORIZED_STACK_ID) {
     return null;
   }
 
-  return fieldType === FieldType.SingleSelect
-    ? (data as ISelectFieldChoice).name
-    : (data as IUserCellValue);
+  return data;
 };

@@ -1,6 +1,7 @@
 import type { RouteConfig } from '@asteasolutions/zod-to-openapi';
-import { spaceRolesSchema } from '@teable/core';
+import { roleSchema } from '@teable/core';
 import { axios } from '../axios';
+import { CollaboratorType } from '../space/types';
 import { registerRoute, urlBuilder } from '../utils';
 import { z } from '../zod';
 
@@ -11,7 +12,9 @@ export const getBaseItemSchema = z.object({
   name: z.string(),
   spaceId: z.string(),
   icon: z.string().nullable(),
-  role: spaceRolesSchema,
+  role: roleSchema,
+  collaboratorType: z.nativeEnum(CollaboratorType).optional(),
+  isUnrestricted: z.boolean().optional(),
 });
 
 export const getBaseVoSchema = getBaseItemSchema;
@@ -32,7 +35,10 @@ export const GetBaseRoute: RouteConfig = registerRoute({
       description: 'Returns information about a base.',
       content: {
         'application/json': {
-          schema: getBaseVoSchema,
+          schema: getBaseVoSchema.omit({
+            isUnrestricted: true,
+            collaboratorType: true,
+          }),
         },
       },
     },

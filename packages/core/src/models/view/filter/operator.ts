@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/naming-convention */
 import { pick, pullAll, uniq } from 'lodash';
 import { z } from 'zod';
-import type { FieldCore } from '../../field';
-import { CellValueType, FieldType } from '../../field';
+import { CellValueType, FieldType } from '../../field/constant';
+import type { FieldCore } from '../../field/field';
 
 export const is = z.literal('is');
 export const isNot = z.literal('isNot');
@@ -30,6 +30,15 @@ export const isOnOrAfter = z.literal('isOnOrAfter');
 export const today = z.literal('today');
 export const tomorrow = z.literal('tomorrow');
 export const yesterday = z.literal('yesterday');
+export const currentWeek = z.literal('currentWeek');
+export const currentMonth = z.literal('currentMonth');
+export const currentYear = z.literal('currentYear');
+export const lastWeek = z.literal('lastWeek');
+export const lastMonth = z.literal('lastMonth');
+export const lastYear = z.literal('lastYear');
+export const nextWeekPeriod = z.literal('nextWeekPeriod');
+export const nextMonthPeriod = z.literal('nextMonthPeriod');
+export const nextYearPeriod = z.literal('nextYearPeriod');
 export const oneWeekAgo = z.literal('oneWeekAgo');
 export const oneWeekFromNow = z.literal('oneWeekFromNow');
 export const oneMonthAgo = z.literal('oneMonthAgo');
@@ -78,6 +87,15 @@ export const subOperators = z.union([
   today,
   tomorrow,
   yesterday,
+  currentWeek,
+  lastWeek,
+  nextWeekPeriod,
+  currentMonth,
+  lastMonth,
+  nextMonthPeriod,
+  currentYear,
+  lastYear,
+  nextYearPeriod,
   oneWeekAgo,
   oneWeekFromNow,
   oneMonthAgo,
@@ -238,6 +256,15 @@ export const dateTimeFieldSubOperators = z.union([
   today,
   tomorrow,
   yesterday,
+  currentWeek,
+  lastWeek,
+  nextWeekPeriod,
+  currentMonth,
+  lastMonth,
+  nextMonthPeriod,
+  currentYear,
+  lastYear,
+  nextYearPeriod,
   oneWeekAgo,
   oneWeekFromNow,
   oneMonthAgo,
@@ -251,6 +278,15 @@ export const dateTimeFieldValidSubOperators = [
   today.value,
   tomorrow.value,
   yesterday.value,
+  currentWeek.value,
+  lastWeek.value,
+  nextWeekPeriod.value,
+  currentMonth.value,
+  lastMonth.value,
+  nextMonthPeriod.value,
+  currentYear.value,
+  lastYear.value,
+  nextYearPeriod.value,
   oneWeekAgo.value,
   oneWeekFromNow.value,
   oneMonthAgo.value,
@@ -293,7 +329,11 @@ export function getFilterOperatorMapping(field: FieldCore) {
 /**
  * Returns the valid filter operators for a given field value type.
  */
-export function getValidFilterOperators(field: FieldCore): IOperator[] {
+export function getValidFilterOperators(field: {
+  cellValueType: CellValueType;
+  type: FieldType;
+  isMultipleCellValue?: boolean;
+}): IOperator[] {
   let operationSet: IOperator[] = [];
 
   const { cellValueType, type, isMultipleCellValue } = field;
@@ -321,8 +361,20 @@ export function getValidFilterOperators(field: FieldCore): IOperator[] {
   // 2. Then repair the operator according to fieldType
   switch (type) {
     case FieldType.SingleSelect: {
-      pullAll(operationSet, [contains.value, doesNotContain.value]);
-      operationSet.splice(2, 0, ...[isAnyOf.value, isNoneOf.value]);
+      if (isMultipleCellValue) {
+        operationSet = [
+          hasAnyOf.value,
+          hasAllOf.value,
+          isExactly.value,
+          hasNoneOf.value,
+          isEmpty.value,
+          isNotEmpty.value,
+        ];
+      } else {
+        pullAll(operationSet, [contains.value, doesNotContain.value]);
+        operationSet.splice(2, 0, isAnyOf.value, isNoneOf.value);
+      }
+
       break;
     }
     case FieldType.MultipleSelect: {
@@ -337,6 +389,8 @@ export function getValidFilterOperators(field: FieldCore): IOperator[] {
       break;
     }
     case FieldType.User:
+    case FieldType.CreatedBy:
+    case FieldType.LastModifiedBy:
     case FieldType.Link: {
       operationSet = isMultipleCellValue
         ? [hasAnyOf.value, hasAllOf.value, isExactly.value, hasNoneOf.value]

@@ -1,29 +1,25 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { BaseRole, SpaceRole } from '@teable/core';
-import {
-  ActionPrefix,
-  RoleType,
-  actionPrefixMap,
-  generateBaseId,
-  getPermissionMap,
-} from '@teable/core';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ActionPrefix, actionPrefixMap, generateBaseId, isUnrestrictedRole } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
+import { CollaboratorType, ResourceType } from '@teable/openapi';
 import type {
   ICreateBaseFromTemplateRo,
   ICreateBaseRo,
   IDuplicateBaseRo,
+  IGetBasePermissionVo,
   IUpdateBaseRo,
   IUpdateOrderRo,
 } from '@teable/openapi';
-import { pick } from 'lodash';
 import { ClsService } from 'nestjs-cls';
 import { IThresholdConfig, ThresholdConfig } from '../../configs/threshold.config';
 import { InjectDbProvider } from '../../db-provider/db.provider';
 import { IDbProvider } from '../../db-provider/db.provider.interface';
 import type { IClsStore } from '../../types/cls';
+import { getMaxLevelRole } from '../../utils/get-max-level-role';
 import { updateOrder } from '../../utils/update-order';
 import { PermissionService } from '../auth/permission.service';
 import { CollaboratorService } from '../collaborator/collaborator.service';
+import { TableOpenApiService } from '../table/open-api/table-open-api.service';
 import { BaseDuplicateService } from './base-duplicate.service';
 
 @Injectable()
@@ -36,43 +32,53 @@ export class BaseService {
     private readonly collaboratorService: CollaboratorService,
     private readonly baseDuplicateService: BaseDuplicateService,
     private readonly permissionService: PermissionService,
+    private readonly tableOpenApiService: TableOpenApiService,
     @InjectDbProvider() private readonly dbProvider: IDbProvider,
     @ThresholdConfig() private readonly thresholdConfig: IThresholdConfig
   ) {}
 
   async getBaseById(baseId: string) {
     const userId = this.cls.get('user.id');
-    const { spaceIds, roleMap } =
-      await this.collaboratorService.getCollaboratorsBaseAndSpaceArray(userId);
-
-    const base = await this.prismaService.base.findFirst({
-      select: {
-        id: true,
-        name: true,
-        icon: true,
-        spaceId: true,
-      },
-      where: {
-        id: baseId,
-        deletedTime: null,
-        spaceId: {
-          in: spaceIds,
+    const departmentIds = this.cls.get('organization.departments')?.map((d) => d.id);
+    const base = await this.prismaService.base
+      .findFirstOrThrow({
+        select: {
+          id: true,
+          name: true,
+          icon: true,
+          spaceId: true,
         },
+        where: {
+          id: baseId,
+          deletedTime: null,
+        },
+      })
+      .catch(() => {
+        throw new NotFoundException('Base not found');
+      });
+    const collaborators = await this.prismaService.collaborator.findMany({
+      where: {
+        resourceId: { in: [baseId, base.spaceId] },
+        principalId: { in: [userId, ...(departmentIds || [])] },
       },
     });
-    if (!base) {
-      throw new NotFoundException('Base not found');
+
+    if (!collaborators.length) {
+      throw new ForbiddenException('cannot access base');
     }
+    const role = getMaxLevelRole(collaborators);
+    const collaborator = collaborators.find((c) => c.roleName === role);
     return {
       ...base,
-      role: roleMap[base.id] || roleMap[base.spaceId],
+      role: role,
+      collaboratorType: collaborator?.resourceType as CollaboratorType,
+      isUnrestricted: isUnrestrictedRole(role),
     };
   }
 
   async getAllBaseList() {
-    const userId = this.cls.get('user.id');
     const { spaceIds, baseIds, roleMap } =
-      await this.collaboratorService.getCollaboratorsBaseAndSpaceArray(userId);
+      await this.collaboratorService.getCurrentUserCollaboratorsBaseAndSpaceArray();
     const baseList = await this.prismaService.base.findMany({
       select: {
         id: true,
@@ -105,7 +111,7 @@ export class BaseService {
     const userId = this.cls.get('user.id');
     const accessTokenId = this.cls.get('accessTokenId');
     const { spaceIds, baseIds } =
-      await this.collaboratorService.getCollaboratorsBaseAndSpaceArray(userId);
+      await this.collaboratorService.getCurrentUserCollaboratorsBaseAndSpaceArray();
 
     if (accessTokenId) {
       const access = await this.prismaService.accessToken.findFirst({
@@ -320,17 +326,77 @@ export class BaseService {
     });
   }
 
-  async getPermission(baseId: string) {
-    const { role } = await this.getBaseById(baseId);
-    return this.getPermissionByRole(role);
-  }
-
-  async getPermissionByRole(role: SpaceRole | BaseRole) {
-    const permissionMap = getPermissionMap(RoleType.Base, role);
-    return pick(permissionMap, [
+  async getPermission() {
+    const permissions = this.cls.get('permissions');
+    return [
       ...actionPrefixMap[ActionPrefix.Table],
       ...actionPrefixMap[ActionPrefix.Base],
       ...actionPrefixMap[ActionPrefix.Automation],
-    ]);
+      ...actionPrefixMap[ActionPrefix.TableRecordHistory],
+    ].reduce((acc, action) => {
+      acc[action] = permissions.includes(action);
+      return acc;
+    }, {} as IGetBasePermissionVo);
+  }
+
+  async permanentDeleteBase(baseId: string) {
+    const accessTokenId = this.cls.get('accessTokenId');
+    await this.permissionService.validPermissions(baseId, ['base|delete'], accessTokenId, true);
+
+    return await this.prismaService.$tx(
+      async (prisma) => {
+        const tables = await prisma.tableMeta.findMany({
+          where: { baseId },
+          select: { id: true },
+        });
+        const tableIds = tables.map(({ id }) => id);
+
+        await this.dropBase(baseId, tableIds);
+        await this.tableOpenApiService.cleanReferenceFieldIds(tableIds);
+        await this.tableOpenApiService.cleanTablesRelatedData(baseId, tableIds);
+        await this.cleanBaseRelatedData(baseId);
+      },
+      {
+        timeout: this.thresholdConfig.bigTransactionTimeout,
+      }
+    );
+  }
+
+  async dropBase(baseId: string, tableIds: string[]) {
+    const sql = this.dbProvider.dropSchema(baseId);
+    if (sql) {
+      return await this.prismaService.txClient().$executeRawUnsafe(sql);
+    }
+    await this.tableOpenApiService.dropTables(tableIds);
+  }
+
+  async cleanBaseRelatedData(baseId: string) {
+    // delete collaborators for base
+    await this.prismaService.txClient().collaborator.deleteMany({
+      where: { resourceId: baseId, resourceType: CollaboratorType.Base },
+    });
+
+    // delete invitation for base
+    await this.prismaService.txClient().invitation.deleteMany({
+      where: { baseId },
+    });
+
+    // delete invitation record for base
+    await this.prismaService.txClient().invitationRecord.deleteMany({
+      where: { baseId },
+    });
+
+    // delete base
+    await this.prismaService.txClient().base.delete({
+      where: { id: baseId },
+    });
+
+    // delete trash for base
+    await this.prismaService.txClient().trash.deleteMany({
+      where: {
+        resourceId: baseId,
+        resourceType: ResourceType.Base,
+      },
+    });
   }
 }

@@ -1,5 +1,5 @@
-import type { SpaceRole } from '@teable/core';
-import type { IGetBaseVo, ICreateTableRo } from '@teable/openapi';
+import type { IRole } from '@teable/core';
+import type { IGetBaseVo, ICreateTableRo, CollaboratorType } from '@teable/openapi';
 import { Table } from './table/table';
 
 export class Base implements IGetBaseVo {
@@ -7,19 +7,17 @@ export class Base implements IGetBaseVo {
   name: string;
   spaceId: string;
   icon: string | null;
-  role: SpaceRole;
+  role: IRole;
+  collaboratorType?: CollaboratorType;
 
   constructor(base: IGetBaseVo) {
-    const { id, name, spaceId, icon, role } = base;
+    const { id, name, spaceId, icon, role, collaboratorType } = base;
     this.id = id;
     this.name = name;
     this.spaceId = spaceId;
     this.icon = icon;
     this.role = role;
-  }
-
-  async sqlQuery(tableId: string, viewId: string, sql: string) {
-    return Table.sqlQuery(this.id, tableId, { viewId, sql });
+    this.collaboratorType = collaboratorType;
   }
 
   async createTable(tableRo?: ICreateTableRo) {

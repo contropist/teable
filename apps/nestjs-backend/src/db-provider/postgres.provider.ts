@@ -1,15 +1,19 @@
+/* eslint-disable sonarjs/no-duplicate-string */
 import { Logger } from '@nestjs/common';
-import type { IFilter, ISortItem } from '@teable/core';
+import type { FieldType, IFilter, ILookupOptionsVo, ISortItem } from '@teable/core';
 import { DriverClient } from '@teable/core';
 import type { PrismaClient } from '@teable/db-main-prisma';
-import type { IAggregationField } from '@teable/openapi';
+import type { IAggregationField, ISearchIndexByQueryRo, TableIndex } from '@teable/openapi';
 import type { Knex } from 'knex';
 import type { IFieldInstance } from '../features/field/model/factory';
 import type { SchemaType } from '../features/field/util';
 import type { IAggregationQueryInterface } from './aggregation-query/aggregation-query.interface';
 import { AggregationQueryPostgres } from './aggregation-query/postgres/aggregation-query.postgres';
+import type { BaseQueryAbstract } from './base-query/abstract';
+import { BaseQueryPostgres } from './base-query/base-query.postgres';
 import type {
   IAggregationQueryExtra,
+  ICalendarDailyCollectionQueryProps,
   IDbProvider,
   IFilterQueryExtra,
   ISortQueryExtra,
@@ -18,8 +22,14 @@ import type { IFilterQueryInterface } from './filter-query/filter-query.interfac
 import { FilterQueryPostgres } from './filter-query/postgres/filter-query.postgres';
 import type { IGroupQueryExtra, IGroupQueryInterface } from './group-query/group-query.interface';
 import { GroupQueryPostgres } from './group-query/group-query.postgres';
+import type { IntegrityQueryAbstract } from './integrity-query/abstract';
+import { IntegrityQueryPostgres } from './integrity-query/integrity-query.postgres';
 import { SearchQueryAbstract } from './search-query/abstract';
-import { SearchQueryPostgres } from './search-query/search-query.postgres';
+import { IndexBuilderPostgres } from './search-query/search-index-builder.postgres';
+import {
+  SearchQueryPostgresBuilder,
+  SearchQueryPostgres,
+} from './search-query/search-query.postgres';
 import { SortQueryPostgres } from './sort-query/postgres/sort-query.postgres';
 import type { ISortQueryInterface } from './sort-query/sort-query.interface';
 
@@ -34,6 +44,10 @@ export class PostgresProvider implements IDbProvider {
       this.knex.raw(`create schema if not exists ??`, [schemaName]).toQuery(),
       this.knex.raw(`revoke all on schema ?? from public`, [schemaName]).toQuery(),
     ];
+  }
+
+  dropSchema(schemaName: string): string {
+    return this.knex.raw(`DROP SCHEMA IF EXISTS ?? CASCADE`, [schemaName]).toQuery();
   }
 
   generateDbTableName(baseId: string, name: string) {
@@ -65,6 +79,16 @@ export class PostgresProvider implements IDbProvider {
       .toQuery();
     const res = await prisma.$queryRawUnsafe<{ exists: boolean }[]>(sql);
     return res[0].exists;
+  }
+
+  checkTableExist(tableName: string): string {
+    const [schemaName, dbTableName] = this.splitTableName(tableName);
+    return this.knex
+      .raw(
+        'SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = ? AND table_name = ?) AS exists',
+        [schemaName, dbTableName]
+      )
+      .toQuery();
   }
 
   renameColumn(tableName: string, oldName: string, newName: string): string[] {
@@ -100,6 +124,58 @@ export class PostgresProvider implements IDbProvider {
       .where({
         table_schema: schemaName,
         table_name: dbTableName,
+      })
+      .toQuery();
+  }
+
+  updateJsonColumn(
+    tableName: string,
+    columnName: string,
+    id: string,
+    key: string,
+    value: string
+  ): string {
+    return this.knex(tableName)
+      .where(this.knex.raw(`"${columnName}"->>'id' = ?`, [id]))
+      .update({
+        [columnName]: this.knex.raw(
+          `
+        jsonb_set(
+          "${columnName}",
+          '{${key}}',
+          to_jsonb(?::text)
+        )
+      `,
+          [value]
+        ),
+      })
+      .toQuery();
+  }
+
+  updateJsonArrayColumn(
+    tableName: string,
+    columnName: string,
+    id: string,
+    key: string,
+    value: string
+  ): string {
+    return this.knex(tableName)
+      .update({
+        [columnName]: this.knex.raw(
+          `
+          (
+            SELECT jsonb_agg(
+              CASE
+                WHEN elem->>'id' = ?
+                THEN jsonb_set(elem, '{${key}}', to_jsonb(?::text))
+                ELSE elem
+              END
+            )
+            FROM jsonb_array_elements("${columnName}") AS elem
+          )
+        `,
+          [id, value]
+        ),
       })
       .toQuery();
   }
@@ -250,10 +326,58 @@ export class PostgresProvider implements IDbProvider {
 
   searchQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    fieldMap?: { [fieldId: string]: IFieldInstance },
-    search?: [string, string]
+    searchFields: IFieldInstance[],
+    tableIndex: TableIndex[],
+    search: [string, string?, boolean?]
   ) {
-    return SearchQueryAbstract.factory(SearchQueryPostgres, originQueryBuilder, fieldMap, search);
+    return SearchQueryAbstract.appendQueryBuilder(
+      SearchQueryPostgres,
+      originQueryBuilder,
+      searchFields,
+      tableIndex,
+      search
+    );
+  }
+
+  searchCountQuery(
+    originQueryBuilder: Knex.QueryBuilder,
+    searchField: IFieldInstance[],
+    search: [string, string?, boolean?],
+    tableIndex: TableIndex[]
+  ) {
+    return SearchQueryAbstract.buildSearchCountQuery(
+      SearchQueryPostgres,
+      originQueryBuilder,
+      searchField,
+      search,
+      tableIndex
+    );
+  }
+
+  searchIndexQuery(
+    originQueryBuilder: Knex.QueryBuilder,
+    dbTableName: string,
+    searchField: IFieldInstance[],
+    searchIndexRo: ISearchIndexByQueryRo,
+    tableIndex: TableIndex[],
+    baseSortIndex?: string,
+    setFilterQuery?: (qb: Knex.QueryBuilder) => void,
+    setSortQuery?: (qb: Knex.QueryBuilder) => void
+  ) {
+    return new SearchQueryPostgresBuilder(
+      originQueryBuilder,
+      dbTableName,
+      searchField,
+      searchIndexRo,
+      tableIndex,
+      baseSortIndex,
+      setFilterQuery,
+      setSortQuery
+    ).getSearchIndexQuery();
+  }
+
+  searchIndex() {
+    return new IndexBuilderPostgres();
   }
 
   shareFilterCollaboratorsQuery(
@@ -270,5 +394,116 @@ export class PostgresProvider implements IDbProvider {
         this.knex.raw(`jsonb_extract_path_text("${dbFieldName}", 'id') AS user_id`)
       );
     }
+  }
+
+  baseQuery(): BaseQueryAbstract {
+    return new BaseQueryPostgres(this.knex);
+  }
+
+  integrityQuery(): IntegrityQueryAbstract {
+    return new IntegrityQueryPostgres(this.knex);
+  }
+
+  calendarDailyCollectionQuery(
+    qb: Knex.QueryBuilder,
+    props: ICalendarDailyCollectionQueryProps
+  ): Knex.QueryBuilder {
+    const { startDate, endDate, startField, endField } = props;
+    const timezone = startField.options.formatting.timeZone;
+
+    return qb
+      .select([
+        this.knex.raw('dates.date'),
+        this.knex.raw('COUNT(*) as count'),
+        this.knex.raw(`(array_agg(?? ORDER BY ??))[1:10] as ids`, ['__id', startField.dbFieldName]),
+      ])
+      .crossJoin(
+        this.knex.raw(
+          `(SELECT date::date as date
+      FROM generate_series(
+        (?::timestamptz AT TIME ZONE ?)::date,
+        (?::timestamptz AT TIME ZONE ?)::date,
+        '1 day'::interval
+      ) AS date) as dates`,
+          [startDate, timezone, endDate, timezone]
+        )
+      )
+      .where((builder) => {
+        builder
+          .where(startField.dbFieldName, '<', endDate)
+          .andWhere(
+            this.knex.raw(`COALESCE(??::timestamptz, ??)::timestamptz >= ?::timestamptz`, [
+              endField.dbFieldName,
+              startField.dbFieldName,
+              startDate,
+            ])
+          )
+          .andWhere((subBuilder) => {
+            subBuilder
+              .whereRaw(`(??::timestamptz AT TIME ZONE ?)::date <= dates.date`, [
+                startField.dbFieldName,
+                timezone,
+              ])
+              .andWhereRaw(
+                `(COALESCE(??::timestamptz, ??)::timestamptz AT TIME ZONE ?)::date >= dates.date`,
+                [endField.dbFieldName, startField.dbFieldName, timezone]
+              );
+          });
+      })
+      .groupBy('dates.date')
+      .orderBy('dates.date', 'asc');
+  }
+
+  // select id and lookup_options for "field" table options is a json saved in string format, match optionsKey and value
+  // please use json method in postgres
+  lookupOptionsQuery(optionsKey: keyof ILookupOptionsVo, value: string): string {
+    return this.knex('field')
+      .select({
+        tableId: 'table_id',
+        id: 'id',
+        type: 'type',
+        name: 'name',
+        lookupOptions: 'lookup_options',
+      })
+      .whereNull('deleted_time')
+      .whereRaw(`lookup_options::json->>'${optionsKey}' = ?`, [value])
+      .toQuery();
+  }
+
+  optionsQuery(type: FieldType, optionsKey: string, value: string): string {
+    return this.knex('field')
+      .select({
+        tableId: 'table_id',
+        id: 'id',
+        name: 'name',
+        description: 'description',
+        notNull: 'not_null',
+        unique: 'unique',
+        isPrimary: 'is_primary',
+        dbFieldName: 'db_field_name',
+        isComputed: 'is_computed',
+        isPending: 'is_pending',
+        hasError: 'has_error',
+        dbFieldType: 'db_field_type',
+        isMultipleCellValue: 'is_multiple_cell_value',
+        isLookup: 'is_lookup',
+        lookupOptions: 'lookup_options',
+        type: 'type',
+        options: 'options',
+        cellValueType: 'cell_value_type',
+      })
+      .whereNull('deleted_time')
+      .whereNull('is_lookup')
+      .whereRaw(`options::json->>'${optionsKey}' = ?`, [value])
+      .where('type', type)
+      .toQuery();
+  }
+
+  searchBuilder(qb: Knex.QueryBuilder, search: [string, string][]): Knex.QueryBuilder {
+    return qb.where((builder) => {
+      search.forEach(([field, value]) => {
+        builder.orWhere(field, 'ilike', `%${value}%`);
+      });
+    });
   }
 }

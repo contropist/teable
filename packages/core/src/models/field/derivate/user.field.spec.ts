@@ -4,7 +4,7 @@ import { plainToInstance } from 'class-transformer';
 import { CellValueType, DbFieldType, FieldType } from '../constant';
 import { FieldCore } from '../field';
 import { convertFieldRoSchema } from '../field.schema';
-import type { IUserCellValue } from './user.field';
+import type { IUserCellValue } from './abstract/user.field.abstract';
 import { UserFieldCore } from './user.field';
 
 describe('UserFieldCore', () => {
@@ -151,7 +151,6 @@ describe('UserFieldCore', () => {
     expect(
       field.validateCellValue({ id: 'usrxxxxxx ', title: '', email: 'anonymous@teable.io' }).success
     ).toBe(true);
-    expect(field.validateCellValue({ id: 'xxxxxxxxxxx ', title: '' }).success).toBe(false);
     expect(field.validateCellValue([cellValue]).success).toBe(false);
   });
 

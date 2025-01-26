@@ -5,48 +5,50 @@ import type { EditorSelection } from '@codemirror/state';
 import { keymap } from '@codemirror/view';
 import type { FunctionName } from '@teable/core';
 import { FormulaLexer } from '@teable/core';
+import { useTheme } from '@teable/next-themes';
 import { Button, cn } from '@teable/ui-lib';
 import { CharStreams } from 'antlr4ts';
 import Fuse from 'fuse.js';
-import { keyBy } from 'lodash';
+import { cloneDeep, keyBy } from 'lodash';
+import { AlertCircle } from 'lucide-react';
 import type { FC } from 'react';
-import { useRef, useState, useMemo, useCallback } from 'react';
-import { ThemeKey } from '../../../context';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from '../../../context/app/i18n';
-import { useFieldStaticGetter, useFields, useTheme } from '../../../hooks';
+import { useFieldStaticGetter, useFields } from '../../../hooks';
+import { useAIStream } from '../../../hooks/use-ai';
 import { FormulaField } from '../../../model';
+import { MagicAI } from '../../comment/comment-editor/plate-ui/icons';
 import type { ICodeEditorRef } from './components';
-import { FunctionGuide, FunctionHelper, CodeEditor } from './components';
+import { CodeEditor, FunctionGuide, FunctionHelper } from './components';
 import {
-  Type2IconMap,
   FOCUS_TOKENS_SET,
-  FORMULA_FUNCTIONS_MAP,
-  DEFAULT_FUNCTION_GUIDE,
-  getFunctionsDisplayMap,
+  Type2IconMap,
+  useFormulaFunctionsMap,
+  useFunctionsDisplayMap,
 } from './constants';
 import { THEME_EXTENSIONS, TOKEN_EXTENSIONS, getVariableExtensions } from './extensions';
-import { SuggestionItemType } from './interface';
+import { getFormulaPrompt } from './extensions/ai';
 import type {
   IFocusToken,
   IFuncHelpData,
   IFunctionCollectionItem,
   IFunctionSchema,
 } from './interface';
+import { SuggestionItemType } from './interface';
 import { FormulaNodePathVisitor } from './visitor';
 
 interface IFormulaEditorProps {
   expression?: string;
   onConfirm?: (expression: string) => void;
+  enableAI?: boolean;
 }
 
-const Functions = Array.from(FORMULA_FUNCTIONS_MAP).map((item) => item[1]);
-
 export const FormulaEditor: FC<IFormulaEditorProps> = (props) => {
-  const { expression, onConfirm } = props;
+  const { expression, onConfirm, enableAI } = props;
   const fields = useFields({ withHidden: true, withDenied: true });
-  const { theme } = useTheme();
+  const { resolvedTheme } = useTheme();
   const { t } = useTranslation();
-  const isLightTheme = theme === ThemeKey.Light;
+  const isLightTheme = resolvedTheme === 'light';
   const getFieldStatic = useFieldStaticGetter();
   const listRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<ICodeEditorRef | null>(null);
@@ -60,6 +62,19 @@ export const FormulaEditor: FC<IFormulaEditorProps> = (props) => {
       : '';
   });
   const [errMsg, setErrMsg] = useState('');
+  const formulaFunctionsMap = useFormulaFunctionsMap();
+  const Functions = useMemo(
+    () => Array.from(formulaFunctionsMap).map((item) => item[1]),
+    [formulaFunctionsMap]
+  );
+  const functionsDisplayMap = useFunctionsDisplayMap();
+  const { generateAIResponse, text, loading, error } = useAIStream();
+
+  useEffect(() => {
+    if (text) {
+      setExpressionByName(text);
+    }
+  }, [text]);
 
   const filteredFields = useMemo(() => {
     const fuse = new Fuse(fields, {
@@ -86,21 +101,22 @@ export const FormulaEditor: FC<IFormulaEditorProps> = (props) => {
     searchValue =
       searchValue[searchValue.length - 1] === '}' ? searchValue.slice(0, -1) : searchValue;
 
-    const functionsDisplayMap = getFunctionsDisplayMap();
     const orderedFunctionList: IFunctionSchema<FunctionName>[] = [];
     const filteredFunctionList = searchValue
       ? fuse.search(searchValue).map((data) => data.item)
       : Functions;
 
+    const clonedFunctionsDisplayMap = cloneDeep(functionsDisplayMap);
+
     filteredFunctionList.forEach((item, index) => {
       const funcType = item.func.type;
-      functionsDisplayMap[funcType].list.push(item);
-      if (functionsDisplayMap[funcType].sortIndex === -1) {
-        functionsDisplayMap[funcType].sortIndex = index;
+      clonedFunctionsDisplayMap[funcType].list.push(item);
+      if (clonedFunctionsDisplayMap[funcType].sortIndex === -1) {
+        clonedFunctionsDisplayMap[funcType].sortIndex = index;
       }
     });
 
-    let formatFunctionList: IFunctionCollectionItem[] = Object.values(functionsDisplayMap)
+    let formatFunctionList: IFunctionCollectionItem[] = Object.values(clonedFunctionsDisplayMap)
       .filter((item) => item.list.length)
       .sort((prev, next) => prev.sortIndex - next.sortIndex);
 
@@ -117,7 +133,7 @@ export const FormulaEditor: FC<IFormulaEditorProps> = (props) => {
       orderedFunctionList,
       formatFunctionList,
     };
-  }, [focusToken]);
+  }, [Functions, focusToken?.value, functionsDisplayMap]);
 
   const totalItemCount = filteredFields.length + orderedFunctionList.length;
 
@@ -238,22 +254,26 @@ export const FormulaEditor: FC<IFormulaEditorProps> = (props) => {
   const functionGuideData = useMemo(() => {
     if (
       suggestionItemType === SuggestionItemType.Function &&
-      FORMULA_FUNCTIONS_MAP.has(suggestionItemKey as FunctionName)
+      formulaFunctionsMap.has(suggestionItemKey as FunctionName)
     ) {
-      return FORMULA_FUNCTIONS_MAP.get(
+      return formulaFunctionsMap.get(
         suggestionItemKey as FunctionName
       ) as IFunctionSchema<FunctionName>;
     }
     if (suggestionItemType === SuggestionItemType.Field) {
       return {
         name: suggestionItemName,
-        summary: `Returns the value to the cells of the ${suggestionItemName} field.`,
+        summary: t('editor.formula.fieldValue', { fieldName: suggestionItemName }),
         definition: `{${suggestionItemName}}`,
         example: `{${suggestionItemName}}`,
       } as Partial<IFunctionSchema<FunctionName>>;
     }
-    return DEFAULT_FUNCTION_GUIDE as IFunctionSchema<FunctionName>;
-  }, [suggestionItemKey, suggestionItemName, suggestionItemType]);
+    return {
+      name: t('field.title.formula'),
+      summary: t('formula.FORMULA.summary'),
+      example: t('formula.FORMULA.example'),
+    } as unknown as IFunctionSchema<FunctionName>;
+  }, [formulaFunctionsMap, suggestionItemKey, suggestionItemName, suggestionItemType, t]);
 
   const onValueChange = useCallback(
     (value: string) => {
@@ -321,20 +341,56 @@ export const FormulaEditor: FC<IFormulaEditorProps> = (props) => {
     }
   };
 
+  const handleGenerateFormula = useCallback(() => {
+    if (!expressionByName || loading) return;
+    if (expressionByName.startsWith('//')) {
+      generateAIResponse(getFormulaPrompt(expressionByName.slice(2), fields));
+    }
+  }, [expressionByName, fields, generateAIResponse, loading]);
   const codeBg = isLightTheme ? 'bg-slate-100' : 'bg-gray-900';
+
+  // only generate formula when the expression starts with //
+  const isReadyToGenerate = expressionByName.startsWith('//');
 
   return (
     <div className="w-[620px]">
       <div className="flex h-12 w-full items-center justify-between border-b-DEFAULT pl-4 pr-2">
-        <h1 className="text-base">{t('editor.formula.title')}</h1>
+        <div className="flex items-center gap-1">
+          <h1 className="text-base">{t('editor.formula.title')}</h1>
+          {enableAI && (
+            <div className="flex items-center gap-2">
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={handleGenerateFormula}
+                disabled={!isReadyToGenerate || loading}
+              >
+                <MagicAI
+                  className={cn('size-4', loading && 'animate-[pulse_1s_ease-in-out_infinite]')}
+                  active={isReadyToGenerate || loading}
+                />
+              </Button>
+              {error && (
+                <div className="flex items-center gap-1 text-xs text-destructive">
+                  <AlertCircle className="size-3" />
+                  <span>{error}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-      <div className={cn('flex flex-col w-full border-b-[1px] caret-foreground', codeBg)}>
+
+      <div className={cn('flex w-full flex-col border-b caret-foreground', codeBg)}>
         <CodeEditor
           ref={editorRef}
           value={expressionByName}
           extensions={extensions}
           onChange={onValueChange}
           onSelectionChange={onSelectionChange}
+          placeholder={
+            enableAI ? t('editor.formula.placeholderForAI') : t('editor.formula.placeholder')
+          }
         />
         <div className="h-5 w-full truncate px-2 text-xs text-destructive">{errMsg}</div>
       </div>
@@ -344,7 +400,7 @@ export const FormulaEditor: FC<IFormulaEditorProps> = (props) => {
         </div>
         <div>
           <Button size={'sm'} className="ml-2" onClick={onConfirmInner}>
-            Confirm
+            {t('common.confirm')}
           </Button>
         </div>
       </div>
@@ -355,7 +411,7 @@ export const FormulaEditor: FC<IFormulaEditorProps> = (props) => {
               {filteredFields.length > 0 && (
                 <div>
                   <h3 className="text- py-1 pl-2 text-[13px] font-semibold text-slate-500">
-                    Fields
+                    {t('functionType.fields')}
                   </h3>
                   {filteredFields.map((result, index: number) => {
                     const { id, name, type, isLookup } = result.item;

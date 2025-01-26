@@ -1,4 +1,5 @@
-import { Admin, Home } from '@teable/icons';
+import { Admin, Database, Home, Settings, Trash2 } from '@teable/icons';
+import { useSession } from '@teable/sdk/hooks';
 import { cn } from '@teable/ui-lib/shadcn';
 import { Button } from '@teable/ui-lib/shadcn/ui/button';
 import Link from 'next/link';
@@ -12,6 +13,8 @@ export const SpaceSideBar = (props: { isAdmin?: boolean | null }) => {
   const { isAdmin } = props;
   const router = useRouter();
   const { t } = useTranslation(spaceConfig.i18nNamespaces);
+  const { user } = useSession();
+  const organization = user?.organization;
 
   const pageRoutes: {
     href: string;
@@ -25,10 +28,26 @@ export const SpaceSideBar = (props: { isAdmin?: boolean | null }) => {
       Icon: Home,
     },
     {
+      href: '/space/shared-base',
+      text: t('space:sharedBase.title'),
+      Icon: Database,
+    },
+    {
+      href: `/enterprise/${organization?.id}`,
+      text: t('noun.organizationPanel'),
+      Icon: Admin,
+      hidden: !organization?.isAdmin,
+    },
+    {
       href: '/admin/setting',
       text: t('noun.adminPanel'),
-      Icon: Admin,
+      Icon: Settings,
       hidden: !isAdmin,
+    },
+    {
+      href: '/space/trash',
+      text: t('noun.trash'),
+      Icon: Trash2,
     },
   ];
   return (

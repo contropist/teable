@@ -2,12 +2,20 @@ import { ViewType, getUniqName } from '@teable/core';
 import { Plus } from '@teable/icons';
 import { useViews } from '@teable/sdk';
 import { useTablePermission } from '@teable/sdk/hooks';
-import { Button, Popover, PopoverContent, PopoverTrigger, cn } from '@teable/ui-lib/shadcn';
+import {
+  Button,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Separator,
+  cn,
+} from '@teable/ui-lib/shadcn';
 import { useTranslation } from 'next-i18next';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { GUIDE_CREATE_VIEW } from '@/components/Guide';
 import { VIEW_ICON_MAP } from '../../view/constant';
 import { useAddView } from '../../view/list/useAddView';
+import { AddPluginView } from './AddPluginView';
 
 export const AddView: React.FC = () => {
   const addView = useAddView();
@@ -16,6 +24,10 @@ export const AddView: React.FC = () => {
   const [isOpen, setOpen] = useState(false);
   const { t } = useTranslation('table');
 
+  const closePopover = useCallback(() => {
+    setOpen(false);
+  }, []);
+
   const viewInfoList = [
     {
       name: t('view.category.table'),
@@ -23,9 +35,19 @@ export const AddView: React.FC = () => {
       Icon: VIEW_ICON_MAP[ViewType.Grid],
     },
     {
+      name: t('view.category.gallery'),
+      type: ViewType.Gallery,
+      Icon: VIEW_ICON_MAP[ViewType.Gallery],
+    },
+    {
       name: t('view.category.kanban'),
       type: ViewType.Kanban,
       Icon: VIEW_ICON_MAP[ViewType.Kanban],
+    },
+    {
+      name: t('view.category.calendar'),
+      type: ViewType.Calendar,
+      Icon: VIEW_ICON_MAP[ViewType.Calendar],
     },
     {
       name: t('view.category.form'),
@@ -74,6 +96,8 @@ export const AddView: React.FC = () => {
             </Button>
           );
         })}
+        <Separator />
+        <AddPluginView onClose={closePopover} />
       </PopoverContent>
     </Popover>
   );

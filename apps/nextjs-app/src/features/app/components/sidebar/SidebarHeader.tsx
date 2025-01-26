@@ -13,15 +13,14 @@ export const SidebarHeader = (prop: ISidebarHeaderProps) => {
   const { t } = useTranslation('common');
 
   return (
-    <div className="m-2 flex h-7 items-center gap-1">
+    <div className="flex h-10 w-full items-center gap-1 p-2">
       {headerLeft}
-      <div className="grow basis-0" />
       {onExpand && (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                className="w-6 shrink-0 px-0"
+                className="ml-auto mr-0 w-6 shrink-0 px-0"
                 variant="ghost"
                 size="xs"
                 onClick={() => onExpand?.()}

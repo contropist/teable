@@ -5,7 +5,7 @@ import { useFieldCellEditable, useFields } from '../../../hooks';
 import { createRecordInstance } from '../../../model';
 import { CellType } from '../../grid/interface';
 import type { ICell, ICellItem, IGridColumn, IInnerCell } from '../../grid/interface';
-import { createCellValue2GridDisplay } from './use-grid-columns';
+import { useCreateCellValue2GridDisplay } from './use-grid-columns';
 
 export const useGridPrefillingRow = (columns: (IGridColumn & { id: string })[]) => {
   const fields = useFields();
@@ -40,7 +40,7 @@ export const useGridPrefillingRow = (columns: (IGridColumn & { id: string })[]) 
 
     return record;
   }, [prefillingFieldValueMap]);
-
+  const createCellValue2GridDisplay = useCreateCellValue2GridDisplay();
   const getPrefillingCellContent = useCallback<(cell: ICellItem) => ICell>(
     (cell) => {
       const [columnIndex] = cell;
@@ -48,11 +48,11 @@ export const useGridPrefillingRow = (columns: (IGridColumn & { id: string })[]) 
       if (localRecord != null) {
         const fieldId = columns[columnIndex]?.id;
         if (!fieldId) return { type: CellType.Loading };
-        return cellValue2GridDisplay(localRecord, columnIndex);
+        return cellValue2GridDisplay(localRecord, columnIndex, true);
       }
       return { type: CellType.Loading };
     },
-    [columns, fieldEditable, fields, localRecord]
+    [columns, createCellValue2GridDisplay, fieldEditable, fields, localRecord]
   );
 
   const onPrefillingCellEdited = useCallback(

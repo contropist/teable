@@ -4,8 +4,9 @@ import { Plus } from '@teable/icons';
 import type { IGetRecordsRo } from '@teable/openapi';
 import { Button, Dialog, DialogContent, DialogTrigger, useToast } from '@teable/ui-lib';
 import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
-import { AnchorProvider } from '../../../context';
+import { LinkViewProvider, RowCountProvider } from '../../../context';
 import { useTranslation } from '../../../context/app/i18n';
+import { LinkFilterProvider } from '../../../context/query/LinkFilterProvider';
 import { ExpandRecorder } from '../../expand-record';
 import type { ILinkEditorMainRef } from './EditorMain';
 import { LinkEditorMain } from './EditorMain';
@@ -32,8 +33,6 @@ export enum LinkDisplayType {
 
 export const LinkEditor = (props: ILinkEditorProps) => {
   const {
-    fieldId,
-    recordId,
     cellValue,
     options,
     onChange,
@@ -61,11 +60,19 @@ export const LinkEditor = (props: ILinkEditorProps) => {
     return JSON.stringify(values) === JSON.stringify(cellValue);
   }, [cellValue, values]);
 
+  const selectedRecordIds = useMemo(() => {
+    return Array.isArray(cellValue)
+      ? cellValue.map((v) => v.id)
+      : cellValue?.id
+        ? [cellValue.id]
+        : [];
+  }, [cellValue]);
+
   const recordQuery = useMemo((): IGetRecordsRo => {
     return {
-      filterLinkCellSelected: recordId ? [fieldId, recordId] : fieldId,
+      selectedRecordIds,
     };
-  }, [fieldId, recordId]);
+  }, [selectedRecordIds]);
 
   useEffect(() => {
     if (cellValue == null) return setValues(cellValue);
@@ -76,7 +83,7 @@ export const LinkEditor = (props: ILinkEditorProps) => {
     if (recordId) {
       const existed = document.getElementById(`${foreignTableId}-${recordId}`);
       if (existed) {
-        toast({ description: 'This record is already open.' });
+        toast({ description: t('editor.link.alreadyOpen') });
         return;
       }
     }
@@ -112,19 +119,28 @@ export const LinkEditor = (props: ILinkEditorProps) => {
       {Boolean(selectedRowCount) &&
         (displayType === LinkDisplayType.Grid ? (
           <div className="relative h-40 w-full overflow-hidden rounded-md border">
-            <AnchorProvider tableId={foreignTableId}>
-              <LinkList
-                ref={listRef}
-                type={LinkListType.Selected}
-                rowCount={selectedRowCount}
-                readonly={readonly}
-                cellValue={cellValue}
-                isMultiple={isMultiple}
-                recordQuery={recordQuery}
-                onChange={onRecordListChange}
-                onExpand={onRecordExpand}
-              />
-            </AnchorProvider>
+            <LinkViewProvider linkFieldId={props.fieldId}>
+              <LinkFilterProvider
+                filterLinkCellCandidate={
+                  props.recordId ? [props.fieldId, props.recordId] : props.fieldId
+                }
+                selectedRecordIds={selectedRecordIds}
+              >
+                <RowCountProvider>
+                  <LinkList
+                    ref={listRef}
+                    type={LinkListType.Selected}
+                    rowCount={selectedRowCount}
+                    readonly={readonly}
+                    cellValue={cellValue}
+                    isMultiple={isMultiple}
+                    recordQuery={recordQuery}
+                    onChange={onRecordListChange}
+                    onExpand={onRecordExpand}
+                  />
+                </RowCountProvider>
+              </LinkFilterProvider>
+            </LinkViewProvider>
           </div>
         ) : (
           cvArray?.map(({ id, title }) => (

@@ -1,6 +1,7 @@
 import type { RouteConfig } from '@asteasolutions/zod-to-openapi';
 import type { IFieldVo, IGetFieldsQuery } from '@teable/core';
 import { fieldVoSchema, getFieldsQuerySchema } from '@teable/core';
+import type { AxiosResponse } from 'axios';
 import { axios } from '../axios';
 import { registerRoute, urlBuilder } from '../utils';
 import { z } from '../zod';
@@ -30,6 +31,11 @@ export const GetFieldListRoute: RouteConfig = registerRoute({
   tags: ['field'],
 });
 
-export const getFields = async (tableId: string, query?: IGetFieldsQuery) => {
-  return axios.get<IFieldVo[]>(urlBuilder(GET_FIELD_LIST, { tableId }), { params: query });
-};
+export async function getFields(
+  tableId: string,
+  query?: IGetFieldsQuery
+): Promise<AxiosResponse<IFieldVo[]>> {
+  return axios.get<IFieldVo[]>(urlBuilder(GET_FIELD_LIST, { tableId }), {
+    params: query,
+  });
+}
