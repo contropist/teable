@@ -1,9 +1,10 @@
 import type { IAttachmentCellValue } from '@teable/core';
 import type { IFilePreviewDialogRef } from '@teable/ui-lib';
-import { Dialog, DialogContent, FilePreviewDialog, FilePreviewProvider } from '@teable/ui-lib';
+import { cn, Dialog, DialogContent, FilePreviewDialog, FilePreviewProvider } from '@teable/ui-lib';
 import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
 import { AttachmentEditorMain } from '../../editor';
 import type { IEditorProps } from '../../grid/components';
+import { useAttachmentPreviewI18Map } from '../../hooks';
 import type { IWrapperEditorProps } from './type';
 
 interface IGridAttachmentEditorRef {
@@ -18,7 +19,7 @@ export const GridAttachmentEditor = forwardRef<
   const containerRef = useRef<HTMLDivElement>(null);
   const attachments = record.getCellValue(field.id) as IAttachmentCellValue;
   const imagePreviewDialogRef = useRef<IFilePreviewDialogRef>(null);
-
+  const i18nMap = useAttachmentPreviewI18Map();
   const previewFiles = useMemo(() => {
     return attachments
       ? attachments.map((item) => ({
@@ -49,12 +50,15 @@ export const GridAttachmentEditor = forwardRef<
       <Dialog open={isEditing} onOpenChange={setEditing}>
         <DialogContent
           container={containerRef.current}
-          className="click-outside-ignore h-96 flex-1 overflow-hidden"
+          className={cn(
+            'click-outside-ignore flex-1 overflow-hidden max-w-xl p-5 pt-8',
+            Object.values(attachments || {}).length > 5 ? 'h-full max-h-[600px] mt-1 mb-1' : 'h-96'
+          )}
         >
           <AttachmentEditorMain value={attachments || []} onChange={setAttachments} />
         </DialogContent>
       </Dialog>
-      <FilePreviewProvider>
+      <FilePreviewProvider i18nMap={i18nMap}>
         <FilePreviewDialog ref={imagePreviewDialogRef} files={previewFiles} />
       </FilePreviewProvider>
     </>

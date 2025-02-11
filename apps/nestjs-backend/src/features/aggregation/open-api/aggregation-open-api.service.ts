@@ -2,12 +2,16 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import type { StatisticsFunc } from '@teable/core';
 import { getValidStatisticFunc } from '@teable/core';
 import type {
+  ISearchIndexByQueryRo,
   IAggregationRo,
   IAggregationVo,
+  ICalendarDailyCollectionRo,
+  ICalendarDailyCollectionVo,
   IGroupPointsRo,
   IGroupPointsVo,
   IQueryBaseRo,
   IRowCountVo,
+  ISearchCountRo,
 } from '@teable/openapi';
 import { forIn, isEmpty, map } from 'lodash';
 import type { IWithView } from '../aggregation.service';
@@ -18,9 +22,19 @@ export class AggregationOpenApiService {
   constructor(private readonly aggregationService: AggregationService) {}
 
   async getAggregation(tableId: string, query?: IAggregationRo): Promise<IAggregationVo> {
-    const { viewId, filter: customFilter, field: aggregationFields } = query || {};
+    const {
+      viewId,
+      filter: customFilter,
+      field: aggregationFields,
+      groupBy,
+      ignoreViewQuery,
+    } = query || {};
 
-    let withView: IWithView = { viewId, customFilter };
+    let withView: IWithView = {
+      viewId: ignoreViewQuery ? undefined : viewId,
+      customFilter,
+      groupBy,
+    };
 
     const fieldStatistics: Array<{ fieldId: string; statisticFunc: StatisticsFunc }> = [];
 
@@ -57,6 +71,13 @@ export class AggregationOpenApiService {
     return await this.aggregationService.getGroupPoints(tableId, query);
   }
 
+  async getCalendarDailyCollection(
+    tableId: string,
+    query: ICalendarDailyCollectionRo
+  ): Promise<ICalendarDailyCollectionVo> {
+    return await this.aggregationService.getCalendarDailyCollection(tableId, query);
+  }
+
   private async validFieldStats(
     tableId: string,
     fieldStatistics: Array<{ fieldId: string; statisticFunc: StatisticsFunc }>
@@ -85,5 +106,17 @@ export class AggregationOpenApiService {
       (result = result ?? []).push({ fieldId, statisticFunc });
     });
     return result;
+  }
+
+  public async getSearchCount(tableId: string, queryRo: ISearchCountRo, projection?: string[]) {
+    return await this.aggregationService.getSearchCount(tableId, queryRo, projection);
+  }
+
+  public async getRecordIndexBySearchOrder(
+    tableId: string,
+    queryRo: ISearchIndexByQueryRo,
+    projection?: string[]
+  ) {
+    return await this.aggregationService.getRecordIndexBySearchOrder(tableId, queryRo, projection);
   }
 }

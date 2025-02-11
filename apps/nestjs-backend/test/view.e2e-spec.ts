@@ -1,7 +1,7 @@
 /* eslint-disable sonarjs/no-duplicate-string */
 import type { INestApplication } from '@nestjs/common';
 import type { IColumn, IFieldRo, IFieldVo, IViewRo } from '@teable/core';
-import { FieldType, Relationship, ViewType } from '@teable/core';
+import { FieldKeyType, FieldType, Relationship, ViewType } from '@teable/core';
 import type { ICreateTableRo, ITableFullVo } from '@teable/openapi';
 import {
   updateViewDescription,
@@ -9,14 +9,18 @@ import {
   getViewFilterLinkRecords,
   updateViewShareMeta,
   enableShareView,
+  updateViewColumnMeta,
+  updateRecord,
+  getRecords,
+  updateViewLocked,
 } from '@teable/openapi';
-import { getError } from './utils/get-error';
+import { VIEW_DEFAULT_SHARE_META } from './data-helpers/caces/view-default-share-meta';
 import {
   createField,
   getFields,
   initApp,
   createView,
-  deleteTable,
+  permanentDeleteTable,
   createTable,
   getViews,
   getView,
@@ -49,7 +53,7 @@ describe('OpenAPI ViewController (e2e)', () => {
   });
 
   afterEach(async () => {
-    const result = await deleteTable(baseId, table.id);
+    const result = await permanentDeleteTable(baseId, table.id);
     console.log('clear table: ', result);
   });
 
@@ -78,6 +82,33 @@ describe('OpenAPI ViewController (e2e)', () => {
     ]);
   });
 
+  it('/api/table/{tableId}/view (POST) with gallery view', async () => {
+    const viewRo: IViewRo = {
+      name: 'New gallery view',
+      description: 'the new gallery view',
+      type: ViewType.Gallery,
+    };
+
+    const fieldVo = await createField(table.id, {
+      name: 'Attachment',
+      type: FieldType.Attachment,
+    });
+    await createView(table.id, viewRo);
+
+    const result = await getViews(table.id);
+    expect(result).toMatchObject([
+      ...defaultViews,
+      {
+        name: 'New gallery view',
+        description: 'the new gallery view',
+        type: ViewType.Gallery,
+        options: {
+          coverFieldId: fieldVo.id,
+        },
+      },
+    ]);
+  });
+
   it('should update view simple properties', async () => {
     const viewRo: IViewRo = {
       name: 'New view',
@@ -89,10 +120,12 @@ describe('OpenAPI ViewController (e2e)', () => {
 
     await updateViewName(table.id, view.id, { name: 'New view 2' });
     await updateViewDescription(table.id, view.id, { description: 'description2' });
+    await updateViewLocked(table.id, view.id, { isLocked: true });
     const viewNew = await getView(table.id, view.id);
 
     expect(viewNew.name).toEqual('New view 2');
     expect(viewNew.description).toEqual('description2');
+    expect(viewNew.isLocked).toBeTruthy();
   });
 
   it('should create view with field order', async () => {
@@ -239,9 +272,9 @@ describe('OpenAPI ViewController (e2e)', () => {
     });
 
     afterAll(async () => {
-      await deleteTable(baseId, table.id);
-      await deleteTable(baseId, linkTable1.id);
-      await deleteTable(baseId, linkTable2.id);
+      await permanentDeleteTable(baseId, table.id);
+      await permanentDeleteTable(baseId, linkTable1.id);
+      await permanentDeleteTable(baseId, linkTable2.id);
     });
 
     it('should return filter link records', async () => {
@@ -331,7 +364,7 @@ describe('OpenAPI ViewController (e2e)', () => {
     });
 
     afterAll(async () => {
-      await deleteTable(baseId, tableId);
+      await permanentDeleteTable(baseId, tableId);
     });
 
     it('update allowCopy success', async () => {
@@ -340,13 +373,66 @@ describe('OpenAPI ViewController (e2e)', () => {
       expect(view.shareMeta?.allowCopy).toBe(true);
     });
 
-    it('update allowCopy with disallowed view types', async () => {
-      const error = await getError(() =>
-        updateViewShareMeta(tableId, formViewId, { allowCopy: true })
-      );
+    it.each(VIEW_DEFAULT_SHARE_META)(
+      'viewType($viewType) with enabled share with default shareMeta',
+      async (viewShareDefault) => {
+        const view = await createView(tableId, {
+          name: `${viewShareDefault.viewType} view`,
+          type: viewShareDefault.viewType,
+        });
+        await enableShareView({ tableId, viewId: view.id });
+        const { shareMeta } = await getView(tableId, view.id);
+        expect(shareMeta).toEqual(viewShareDefault.defaultShareMeta);
+      }
+    );
+  });
 
-      expect(error?.status).toEqual(400);
-      expect(error?.message).toEqual(`View type(${ViewType.Form}) not support copy`);
+  describe('filter by view ', () => {
+    let table: ITableFullVo;
+    beforeEach(async () => {
+      table = await createTable(baseId, { name: 'table1' });
+    });
+
+    afterEach(async () => {
+      await permanentDeleteTable(baseId, table.id);
+    });
+
+    it('should get records with a field filtered view', async () => {
+      const res = await createView(table.id, {
+        name: 'view1',
+        type: ViewType.Grid,
+      });
+
+      await updateViewColumnMeta(table.id, res.id, [
+        {
+          fieldId: table.fields[1].id,
+          columnMeta: {
+            hidden: true,
+          },
+        },
+      ]);
+
+      await updateRecord(table.id, table.records[0].id, {
+        fieldKeyType: FieldKeyType.Id,
+        record: {
+          fields: {
+            [table.fields[0].id]: 'text',
+            [table.fields[1].id]: 1,
+          },
+        },
+      });
+
+      const recordResult = await getRecords(table.id, {
+        fieldKeyType: FieldKeyType.Id,
+        viewId: res.id,
+      });
+      const fieldResult = await getFields(table.id, res.id);
+
+      expect(recordResult.data.records[0].fields[table.fields[0].id]).toEqual('text');
+      expect(recordResult.data.records[0].fields[table.fields[1].id]).toBeUndefined();
+
+      expect(fieldResult.length).toEqual(table.fields.length - 1);
+      expect(fieldResult.find((field) => field.id === table.fields[1].id)).toBeUndefined();
     });
   });
 });

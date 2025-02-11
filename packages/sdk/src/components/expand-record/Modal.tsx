@@ -1,5 +1,7 @@
 import { Dialog, DialogContent, cn } from '@teable/ui-lib';
 import { type FC, type PropsWithChildren } from 'react';
+import { useRef } from 'react';
+import { ModalContext } from './ModalContext';
 
 export const Modal: FC<
   PropsWithChildren<{
@@ -7,28 +9,35 @@ export const Modal: FC<
     className?: string;
     container?: HTMLDivElement;
     visible?: boolean;
-    showActivity?: boolean;
     onClose?: () => void;
   }>
 > = (props) => {
-  const { modal, className, children, container, visible, showActivity, onClose } = props;
+  const { modal, className, children, container, visible, onClose } = props;
+  const ref = useRef<HTMLDivElement>(null);
 
   return (
-    <Dialog open={visible} onOpenChange={onClose} modal={modal}>
+    <Dialog open={visible} modal={modal}>
       <DialogContent
         closeable={false}
         container={container}
-        className={cn('h-full block p-0 max-w-3xl', showActivity && 'max-w-5xl', className)}
+        className={cn('h-full block p-0 max-w-4xl', className)}
         style={{ width: 'calc(100% - 40px)', height: 'calc(100% - 100px)' }}
-        onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
             onClose?.();
           }
+          if (e.key === 'Enter') {
+            return;
+          }
           e.stopPropagation();
         }}
+        onInteractOutside={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+        }}
+        ref={ref}
       >
-        {children}
+        <ModalContext.Provider value={{ ref }}>{children}</ModalContext.Provider>
       </DialogContent>
     </Dialog>
   );

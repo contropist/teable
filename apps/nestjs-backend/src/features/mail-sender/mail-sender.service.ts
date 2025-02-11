@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { ISendMailOptions } from '@nestjs-modules/mailer';
 import { MailerService } from '@nestjs-modules/mailer';
+import { CollaboratorType } from '@teable/openapi';
 import { BaseConfig, IBaseConfig } from '../../configs/base.config';
 import { IMailConfig, MailConfig } from '../../configs/mail.config';
 
@@ -25,21 +26,30 @@ export class MailSenderService {
 
     return sender.catch((reason) => {
       if (reason) {
+        console.error(reason);
         this.logger.error(`Mail sending failed: ${reason.message}`, reason.stack);
       }
       return false;
     });
   }
 
-  inviteEmailOptions(info: { name: string; email: string; spaceName: string; inviteUrl: string }) {
-    const { name, email, inviteUrl, spaceName } = info;
+  inviteEmailOptions(info: {
+    name: string;
+    email: string;
+    resourceName: string;
+    resourceType: CollaboratorType;
+    inviteUrl: string;
+  }) {
+    const { name, email, inviteUrl, resourceName, resourceType } = info;
+    const resourceAlias = resourceType === CollaboratorType.Space ? 'Space' : 'Base';
     return {
-      subject: `${name} (${email}) invited you to their space ${spaceName} - ${this.baseConfig.brandName}`,
+      subject: `${name} (${email}) invited you to their ${resourceAlias} ${resourceName} - ${this.baseConfig.brandName}`,
       template: 'normal',
       context: {
         name,
         email,
-        spaceName,
+        resourceName,
+        resourceAlias,
         inviteUrl,
         partialBody: 'invite',
       },
@@ -122,6 +132,18 @@ export class MailSenderService {
         email,
         resetPasswordUrl,
         partialBody: 'reset-password',
+      },
+    };
+  }
+
+  sendEmailVerifyCodeEmailOptions(info: { title: string; message: string }) {
+    const { title } = info;
+    return {
+      subject: `${title} - ${this.baseConfig.brandName}`,
+      template: 'normal',
+      context: {
+        partialBody: 'email-verify-code',
+        ...info,
       },
     };
   }

@@ -1,51 +1,38 @@
-import { FieldType, type IGridViewOptions } from '@teable/core';
-import {
-  ArrowUpDown,
-  PaintBucket,
-  Filter as FilterIcon,
-  EyeOff,
-  LayoutList,
-  Share2,
-} from '@teable/icons';
-import {
-  Filter,
-  HideFields,
-  RowHeight,
-  useFields,
-  Sort,
-  Group,
-  useTableId,
-  Color,
-} from '@teable/sdk';
+import { type IGridViewOptions } from '@teable/core';
+import { ArrowUpDown, Filter as FilterIcon, EyeOff, LayoutList, Share2 } from '@teable/icons';
+import { HideFields, RowHeight, useFields, Sort, Group, ViewFilter } from '@teable/sdk';
 import { useView } from '@teable/sdk/hooks/use-view';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-  cn,
-} from '@teable/ui-lib/shadcn';
+import { cn } from '@teable/ui-lib/shadcn';
 import { useTranslation } from 'next-i18next';
+import { useEffect, useRef } from 'react';
 import { GUIDE_VIEW_FILTERING, GUIDE_VIEW_SORTING, GUIDE_VIEW_GROUPING } from '@/components/Guide';
 import { tableConfig } from '@/features/i18n/table.config';
 import { useToolbarChange } from '../../hooks/useToolbarChange';
 import { ToolBarButton } from '../ToolBarButton';
-import { useViewFilterLinkContext } from '../useViewFilterLinkContext';
+import { useToolBarStore } from './useToolBarStore';
 
 export const GridViewOperators: React.FC<{ disabled?: boolean }> = (props) => {
   const { disabled } = props;
-  const tableId = useTableId();
   const view = useView();
   const fields = useFields();
-  const viewFilerContext = useViewFilterLinkContext(tableId, view?.id, { disabled });
   const { onFilterChange, onRowHeightChange, onSortChange, onGroupChange } = useToolbarChange();
   const { t } = useTranslation(tableConfig.i18nNamespaces);
+  const { setFilterRef, setSortRef, setGroupRef } = useToolBarStore();
+  const filterRef = useRef<HTMLButtonElement>(null);
+  const sortRef = useRef<HTMLButtonElement>(null);
+  const groupRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    setFilterRef(filterRef);
+    setSortRef(sortRef);
+    setGroupRef(groupRef);
+  }, [setFilterRef, setGroupRef, setSortRef]);
+
   if (!view || !fields.length) {
     return <div></div>;
   }
-
   return (
-    <div className="flex gap-1">
+    <div className="flex @sm/toolbar:gap-1">
       <HideFields>
         {(text, isActive) => (
           <ToolBarButton
@@ -58,12 +45,9 @@ export const GridViewOperators: React.FC<{ disabled?: boolean }> = (props) => {
           </ToolBarButton>
         )}
       </HideFields>
-      <Filter
+      <ViewFilter
         filters={view?.filter || null}
         onChange={onFilterChange}
-        context={{
-          [FieldType.Link]: viewFilerContext,
-        }}
         contentHeader={
           view.enableShare && (
             <div className="flex max-w-full items-center justify-start rounded-t bg-accent px-4 py-2 text-[11px]">
@@ -78,6 +62,7 @@ export const GridViewOperators: React.FC<{ disabled?: boolean }> = (props) => {
             disabled={disabled}
             isActive={isActive}
             text={text}
+            ref={filterRef}
             className={cn(
               GUIDE_VIEW_FILTERING,
               'max-w-xs',
@@ -89,13 +74,14 @@ export const GridViewOperators: React.FC<{ disabled?: boolean }> = (props) => {
             <FilterIcon className="size-4 text-sm" />
           </ToolBarButton>
         )}
-      </Filter>
+      </ViewFilter>
       <Sort sorts={view?.sort || null} onChange={onSortChange}>
         {(text: string, isActive) => (
           <ToolBarButton
             disabled={disabled}
             isActive={isActive}
             text={text}
+            ref={sortRef}
             className={cn(
               GUIDE_VIEW_SORTING,
               'max-w-xs',
@@ -114,6 +100,7 @@ export const GridViewOperators: React.FC<{ disabled?: boolean }> = (props) => {
             disabled={disabled}
             isActive={isActive}
             text={text}
+            ref={groupRef}
             className={cn(
               GUIDE_VIEW_GROUPING,
               'max-w-xs',
@@ -126,10 +113,12 @@ export const GridViewOperators: React.FC<{ disabled?: boolean }> = (props) => {
           </ToolBarButton>
         )}
       </Group>
-      <TooltipProvider>
+      {/* <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            {/* disabled doesn't trigger the tooltip, so wrap div */}
+            {
+              // disabled doesn't trigger the tooltip, so wrap div
+            }
             <div>
               <Color>
                 {(text: string, isActive) => (
@@ -155,7 +144,7 @@ export const GridViewOperators: React.FC<{ disabled?: boolean }> = (props) => {
             <p>{t('table:toolbar.comingSoon')}</p>
           </TooltipContent>
         </Tooltip>
-      </TooltipProvider>
+      </TooltipProvider> */}
 
       <RowHeight
         rowHeight={(view?.options as IGridViewOptions)?.rowHeight || null}

@@ -15,7 +15,7 @@ import type { ITableFullVo } from '@teable/openapi';
 import {
   createField,
   createTable,
-  deleteTable,
+  permanentDeleteTable,
   getFields,
   initApp,
   updateRecord,
@@ -133,8 +133,8 @@ describe('OpenAPI Rollup field (e2e)', () => {
   });
 
   afterAll(async () => {
-    await deleteTable(baseId, table1.id);
-    await deleteTable(baseId, table2.id);
+    await permanentDeleteTable(baseId, table1.id);
+    await permanentDeleteTable(baseId, table2.id);
 
     await app.close();
   });
@@ -267,7 +267,7 @@ describe('OpenAPI Rollup field (e2e)', () => {
     );
 
     const recordAfter2 = await getRecord(table1.id, table1.records[1].id);
-    expect(recordAfter2.fields[rollupFieldVo.id]).toEqual(1);
+    expect(recordAfter2.fields[rollupFieldVo.id]).toEqual(0);
 
     // add a link record from many - one field
     await updateRecordField(
@@ -377,7 +377,7 @@ describe('OpenAPI Rollup field (e2e)', () => {
     );
 
     const record1 = await getRecord(table1.id, table1.records[1].id);
-    expect(record1.fields[rollupFieldVo.id]).toEqual(1);
+    expect(record1.fields[rollupFieldVo.id]).toEqual(0);
     const record2 = await getRecord(table1.id, table1.records[2].id);
     expect(record2.fields[rollupFieldVo.id]).toEqual(1);
   });
@@ -411,6 +411,24 @@ describe('OpenAPI Rollup field (e2e)', () => {
 
     const recordAfter1 = await getRecord(table1.id, table1.records[1].id);
     expect(recordAfter1.fields[rollupFieldVo.id]).toEqual('123, 456');
+  });
+
+  it('should roll up a flat array  multiple select field -> one - many rollup field', async () => {
+    const lookedUpToField = getFieldByType(table2.fields, FieldType.MultipleSelect);
+    const rollupFieldVo = await rollupFrom(table1, lookedUpToField.id, 'countall({values})');
+    // update a field that will be lookup by after field
+    await updateRecordField(table2.id, table2.records[1].id, lookedUpToField.id, ['rap', 'rock']);
+    await updateRecordField(table2.id, table2.records[2].id, lookedUpToField.id, ['rap', 'hiphop']);
+
+    // add a link record after
+    await updateRecordField(
+      table1.id,
+      table1.records[1].id,
+      getFieldByType(table1.fields, FieldType.Link).id,
+      [{ id: table2.records[1].id }, { id: table2.records[2].id }]
+    );
+    const record = await getRecord(table1.id, table1.records[1].id);
+    expect(record.fields[rollupFieldVo.id]).toEqual(4);
   });
 
   it('should update one - many rollupField by replace a linkRecord from cell', async () => {
@@ -462,7 +480,7 @@ describe('OpenAPI Rollup field (e2e)', () => {
 
     const rollupFieldVo = await rollupFrom(table2, lookedUpToField.id);
     const record0 = await getRecord(table2.id, table2.records[0].id);
-    expect(record0.fields[rollupFieldVo.id]).toEqual(undefined);
+    expect(record0.fields[rollupFieldVo.id]).toEqual(0);
     const record1 = await getRecord(table2.id, table2.records[1].id);
     expect(record1.fields[rollupFieldVo.id]).toEqual(1);
     const record2 = await getRecord(table2.id, table2.records[2].id);
@@ -485,5 +503,111 @@ describe('OpenAPI Rollup field (e2e)', () => {
     const lookedUpToField2 = getFieldByType(table2.fields, FieldType.SingleLineText);
 
     await rollupFrom(table1, lookedUpToField2.id, 'count({values})');
+  });
+
+  describe('Roll up corner case', () => {
+    let table1: ITableFullVo;
+    let table2: ITableFullVo;
+
+    beforeEach(async () => {
+      table1 = await createTable(baseId, {});
+      table2 = await createTable(baseId, {});
+    });
+
+    it('should update multiple field when rollup  to a same a formula field', async () => {
+      const numberField = await createField(table1.id, {
+        type: FieldType.Number,
+      });
+
+      const formulaField = await createField(table1.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `{${numberField.id}}`,
+        },
+      });
+
+      const linkField = await createField(table2.id, {
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.OneMany,
+          foreignTableId: table1.id,
+        },
+      });
+
+      const rollup1 = await createField(table2.id, {
+        name: `rollup 1`,
+        type: FieldType.Rollup,
+        options: {
+          expression: `sum({values})`,
+        },
+        lookupOptions: {
+          foreignTableId: table1.id,
+          linkFieldId: linkField.id,
+          lookupFieldId: formulaField.id,
+        } as ILookupOptionsRo,
+      });
+
+      const rollup2 = await createField(table2.id, {
+        name: `rollup 2`,
+        type: FieldType.Rollup,
+        options: {
+          expression: `sum({values})`,
+        },
+        lookupOptions: {
+          foreignTableId: table1.id,
+          linkFieldId: linkField.id,
+          lookupFieldId: formulaField.id,
+        } as ILookupOptionsRo,
+      });
+
+      await updateRecordField(table1.id, table1.records[0].id, numberField.id, 1);
+      await updateRecordField(table1.id, table1.records[1].id, numberField.id, 2);
+
+      // add a link record after
+      await updateRecordField(table2.id, table2.records[0].id, linkField.id, [
+        { id: table1.records[0].id },
+        { id: table1.records[1].id },
+      ]);
+
+      const record1 = await getRecord(table2.id, table2.records[0].id);
+
+      expect(record1.fields[rollup1.id]).toEqual(3);
+      expect(record1.fields[rollup2.id]).toEqual(3);
+
+      await updateRecordField(table1.id, table1.records[1].id, numberField.id, 3);
+
+      const record2 = await getRecord(table2.id, table2.records[0].id);
+      expect([record2.fields[rollup1.id], record2.fields[rollup2.id]]).toEqual([4, 4]);
+    });
+
+    it('should calculate rollup event has no link record', async () => {
+      const numberField = await createField(table1.id, {
+        type: FieldType.Number,
+      });
+
+      const linkField = await createField(table2.id, {
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.OneMany,
+          foreignTableId: table1.id,
+        },
+      });
+
+      const rollup1 = await createField(table2.id, {
+        name: `rollup 1`,
+        type: FieldType.Rollup,
+        options: {
+          expression: `sum({values})`,
+        },
+        lookupOptions: {
+          foreignTableId: table1.id,
+          linkFieldId: linkField.id,
+          lookupFieldId: numberField.id,
+        } as ILookupOptionsRo,
+      });
+
+      const record1 = await getRecord(table2.id, table2.records[0].id);
+      expect(record1.fields[rollup1.id]).toEqual(0);
+    });
   });
 });

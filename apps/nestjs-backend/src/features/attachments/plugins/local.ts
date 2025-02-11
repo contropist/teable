@@ -1,9 +1,8 @@
 /* eslint-disable @typescript-eslint/naming-convention */
-import { createReadStream, createWriteStream } from 'fs';
-import os from 'node:os';
+import { createReadStream, createWriteStream, unlinkSync } from 'fs';
 import { type Readable as ReadableStream } from 'node:stream';
 import { join, resolve } from 'path';
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { getRandomString } from '@teable/core';
 import type { Request } from 'express';
 import * as fse from 'fs-extra';
@@ -14,7 +13,7 @@ import { IStorageConfig, StorageConfig } from '../../../configs/storage';
 import { FileUtils } from '../../../utils';
 import { Encryptor } from '../../../utils/encryptor';
 import { second } from '../../../utils/second';
-import type StorageAdapter from './adapter';
+import StorageAdapter from './adapter';
 import type { ILocalFileUpload, IObjectMeta, IPresignParams, IRespHeaders } from './types';
 
 interface ITokenEncryptor {
@@ -24,9 +23,9 @@ interface ITokenEncryptor {
 
 @Injectable()
 export class LocalStorage implements StorageAdapter {
+  private logger = new Logger(LocalStorage.name);
   path: string;
   storageDir: string;
-  temporaryDir = resolve(os.tmpdir(), '.temporary');
   expireTokenEncryptor: Encryptor<ITokenEncryptor>;
   static readPath = '/api/attachments/read';
 
@@ -38,18 +37,23 @@ export class LocalStorage implements StorageAdapter {
     this.expireTokenEncryptor = new Encryptor(this.config.encryption);
     this.path = this.config.local.path;
     this.storageDir = resolve(process.cwd(), this.path);
-
-    fse.ensureDirSync(this.temporaryDir);
+    fse.ensureDirSync(StorageAdapter.TEMPORARY_DIR);
     fse.ensureDirSync(this.storageDir);
   }
 
   private getUploadUrl(token: string) {
-    return `/api/attachments/upload/${token}`;
+    return `${this.baseConfig.storagePrefix}/api/attachments/upload/${token}`;
   }
 
   private deleteFile(filePath: string) {
-    if (fse.existsSync(filePath)) {
-      fse.unlinkSync(filePath);
+    try {
+      unlinkSync(filePath);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (error: any) {
+      if (error?.code === 'ENOENT') {
+        return;
+      }
+      throw error;
     }
   }
 
@@ -116,7 +120,7 @@ export class LocalStorage implements StorageAdapter {
 
   async saveTemporaryFile(req: Request) {
     const name = getRandomString(12);
-    const path = resolve(this.temporaryDir, name);
+    const path = resolve(StorageAdapter.TEMPORARY_DIR, name);
     let size = 0;
     return new Promise<ILocalFileUpload>((resolve, reject) => {
       try {
@@ -143,17 +147,20 @@ export class LocalStorage implements StorageAdapter {
           reject(err.message);
         });
       } catch (error) {
+        this.logger.error('saveTemporaryFile error', error);
         this.deleteFile(path);
         reject(error);
       }
     });
   }
 
-  async save(filePath: string, rename: string) {
+  async save(filePath: string, rename: string, isDelete: boolean = true) {
     const distPath = resolve(this.storageDir);
     const newFilePath = resolve(distPath, rename);
     await fse.copy(filePath, newFilePath);
-    await fse.remove(filePath);
+    if (isDelete) {
+      this.deleteFile(filePath);
+    }
     return join(this.path, rename);
   }
 
@@ -170,11 +177,15 @@ export class LocalStorage implements StorageAdapter {
   }
 
   async getFileMate(path: string) {
-    const info = await sharp(path).metadata();
-    return {
-      width: info.width,
-      height: info.height,
-    };
+    try {
+      const info = await sharp(path).metadata();
+      return {
+        width: info.width,
+        height: info.height,
+      };
+    } catch (error) {
+      return {};
+    }
   }
 
   async getObjectMeta(bucket: string, path: string, token: string): Promise<IObjectMeta> {
@@ -209,13 +220,21 @@ export class LocalStorage implements StorageAdapter {
     expiresIn: number = second(this.config.urlExpireIn),
     respHeaders?: IRespHeaders
   ): Promise<string> {
+    return this.getPreviewUrlInner(bucket, path, expiresIn, respHeaders);
+  }
+
+  async getPreviewUrlInner(
+    bucket: string,
+    path: string,
+    expiresIn: number,
+    respHeaders?: IRespHeaders
+  ) {
     const url = this.getUrl(bucket, path, {
       expiresDate: Math.floor(Date.now() / 1000) + expiresIn,
       respHeaders,
     });
     return this.baseConfig.storagePrefix + join('/', url);
   }
-
   verifyReadToken(token: string) {
     try {
       const { expiresDate, respHeaders } = this.expireTokenEncryptor.decrypt(token);
@@ -235,7 +254,7 @@ export class LocalStorage implements StorageAdapter {
     _metadata: Record<string, unknown>
   ) {
     const hash = await FileUtils.getHash(filePath);
-    await this.save(filePath, join(bucket, path));
+    await this.save(filePath, join(bucket, path), false);
     return {
       hash,
       path,
@@ -249,7 +268,7 @@ export class LocalStorage implements StorageAdapter {
     _metadata?: Record<string, unknown>
   ) {
     const name = getRandomString(12);
-    const temPath = resolve(this.temporaryDir, name);
+    const temPath = resolve(StorageAdapter.TEMPORARY_DIR, name);
     if (stream instanceof Buffer) {
       await fse.writeFile(temPath, stream);
     } else {
@@ -275,5 +294,29 @@ export class LocalStorage implements StorageAdapter {
       hash,
       path,
     };
+  }
+
+  async cropImage(
+    bucket: string,
+    path: string,
+    width?: number,
+    height?: number,
+    _newPath?: string
+  ) {
+    const newPath = _newPath || `${path}_${width ?? 0}_${height ?? 0}`;
+    const resizedImagePath = resolve(this.storageDir, bucket, newPath);
+    if (fse.existsSync(resizedImagePath)) {
+      return newPath;
+    }
+
+    const imagePath = resolve(this.storageDir, bucket, path);
+    const image = sharp(imagePath, { failOn: 'none', unlimited: true });
+    const metadata = await image.metadata();
+    if (!metadata.width || !metadata.height) {
+      throw new BadRequestException('Invalid image');
+    }
+    const resizedImage = image.resize(width, height);
+    await resizedImage.toFile(resizedImagePath);
+    return newPath;
   }
 }

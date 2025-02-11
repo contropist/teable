@@ -7,6 +7,8 @@ import {
   recordSchema,
   sortItemSchema,
 } from '@teable/core';
+import type { AxiosResponse } from 'axios';
+import { groupPointsVoSchema } from '../aggregation/type';
 import { axios } from '../axios';
 import { registerRoute, urlBuilder } from '../utils';
 import { z } from '../zod';
@@ -21,6 +23,10 @@ export const queryBaseSchema = z.object({
     example: 'viwXXXXXXX',
     description:
       'Set the view you want to fetch, default is first view. result will filter and sort by view options.',
+  }),
+  ignoreViewQuery: z.string().or(z.boolean()).transform(Boolean).optional().openapi({
+    description:
+      "When a viewId is specified, configure this to true will ignore the view's filter, sort, etc",
   }),
   filterByTql: z.string().optional().openapi({
     example: "{field} = 'Completed' AND {field} > 5",
@@ -48,10 +54,29 @@ export const queryBaseSchema = z.object({
       description: FILTER_DESCRIPTION,
     }),
   search: z
-    .tuple([z.string(), z.string()])
+    .union([
+      z.tuple([z.string()]),
+      z.tuple([z.string(), z.string()]),
+      z.tuple([
+        z.string(),
+        z.string(),
+        z.union([
+          z.string().transform((val) => {
+            if (val === 'true') {
+              return true;
+            } else if (val === 'false') {
+              return false;
+            }
+            return true;
+          }),
+          z.boolean(),
+        ]),
+      ]),
+    ])
     .optional()
+    // because of the https params only be string, so the boolean params should transform
     .openapi({
-      default: ['searchValue', 'fieldIdOrName'],
+      default: ['searchValue', 'fieldIdOrName', false],
       description: 'Search for records that match the specified field and value',
     }),
   filterLinkCellCandidate: z
@@ -72,6 +97,9 @@ export const queryBaseSchema = z.object({
       description:
         'Filter out selected records based on this link cell from the relational table. Note that viewId, filter, and orderBy will not take effect in this case because selected records has it own order. Ignoring recordId gets all the selected records for the field',
     }),
+  selectedRecordIds: z.array(z.string().startsWith(IdPrefix.Record)).optional().openapi({
+    description: 'Filter selected records by record ids',
+  }),
 });
 
 export type IQueryBaseRo = z.infer<typeof queryBaseSchema>;
@@ -128,6 +156,9 @@ export const contentQueryBaseSchema = queryBaseSchema.extend({
       type: 'string',
       description: 'An array of group objects that specifies how the records should be grouped.',
     }),
+  collapsedGroupIds: z.array(z.string()).optional().openapi({
+    description: 'An array of group ids that specifies which groups are collapsed',
+  }),
 });
 
 export const getRecordsRoSchema = getRecordQuerySchema.merge(contentQueryBaseSchema).extend({
@@ -190,6 +221,13 @@ export const recordsVoSchema = z.object({
     description:
       'If more records exist, the response includes an offset. Use this offset for fetching the next page of records.',
   }),
+  extra: z
+    .object({
+      groupPoints: groupPointsVoSchema.optional().openapi({
+        description: 'Group points for the view',
+      }),
+    })
+    .optional(),
 });
 
 export type IRecordsVo = z.infer<typeof recordsVoSchema>;
@@ -219,18 +257,19 @@ export const GetRecordsRoute: RouteConfig = registerRoute({
   tags: ['record'],
 });
 
-export const getRecords = async (tableId: string, query?: IGetRecordsRo) => {
-  return axios.get<IRecordsVo>(
-    urlBuilder(GET_RECORDS_URL, {
-      tableId,
-    }),
-    {
-      params: {
-        ...query,
-        filter: JSON.stringify(query?.filter),
-        orderBy: JSON.stringify(query?.orderBy),
-        groupBy: JSON.stringify(query?.groupBy),
-      },
-    }
-  );
-};
+export async function getRecords(
+  tableId: string,
+  query?: IGetRecordsRo
+): Promise<AxiosResponse<IRecordsVo>> {
+  // Add serialization for complex query parameters
+  const serializedQuery = {
+    ...query,
+    filter: query?.filter ? JSON.stringify(query.filter) : undefined,
+    orderBy: query?.orderBy ? JSON.stringify(query.orderBy) : undefined,
+    groupBy: query?.groupBy ? JSON.stringify(query.groupBy) : undefined,
+  };
+
+  return axios.get<IRecordsVo>(urlBuilder(GET_RECORDS_URL, { tableId }), {
+    params: serializedQuery,
+  });
+}

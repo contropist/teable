@@ -29,8 +29,8 @@ export const KanbanContainer = () => {
 
   const localId = generateLocalId(tableId, viewId);
   const { stackCreatable } = permission;
-  const { id: fieldId, type: fieldType } = stackField;
-  const isUserField = fieldType === FieldType.User;
+  const { id: fieldId, type: fieldType, isLookup } = stackField;
+  const isSingleSelectField = fieldType === FieldType.SingleSelect && !isLookup;
 
   const collapsedStackIdSet = useMemo(() => {
     return new Set(collapsedStackMap[localId] ?? []);
@@ -58,22 +58,26 @@ export const KanbanContainer = () => {
     if (sourceStackId === viewId) {
       const newStackIds = reorder(stackIds, sourceIndex, targetIndex);
 
+      if (!isSingleSelectField || sourceIndex === targetIndex) {
+        return;
+      }
+
       setStackIds(newStackIds);
 
-      if (fieldType === FieldType.SingleSelect) {
-        const newChoices = newStackIds
-          .map((choiceId) => {
-            if (choiceId === UNCATEGORIZED_STACK_ID) return;
-            const stack = stackMap[choiceId];
-            if (stack == null) return;
-            return stack.data;
-          })
-          .filter(Boolean);
-        stackField.convert({
-          type: fieldType,
-          options: { ...stackField.options, choices: newChoices },
-        });
-      }
+      const { choices } = stackField.options;
+      const choiceMap = keyBy(choices, 'name');
+      const newChoices = newStackIds
+        .map((choiceId) => {
+          if (choiceId === UNCATEGORIZED_STACK_ID) return;
+          const stack = stackMap[choiceId];
+          if (stack == null) return;
+          return choiceMap[stack.data as string];
+        })
+        .filter(Boolean);
+      stackField.convert({
+        type: fieldType,
+        options: { ...stackField.options, choices: newChoices },
+      });
       return;
     }
 
@@ -87,7 +91,7 @@ export const KanbanContainer = () => {
         if (tableId && viewId) {
           Record.updateRecordOrders(tableId, viewId, {
             anchorId: cards[targetIndex].id,
-            position: 'before',
+            position: targetIndex > sourceIndex ? 'after' : 'before',
             recordIds: [cards[sourceIndex].id],
           });
         }
@@ -109,7 +113,7 @@ export const KanbanContainer = () => {
 
       if (stack == null) return;
 
-      const fieldValue = getCellValueByStack(fieldType, stack);
+      const fieldValue = getCellValueByStack(stack);
 
       const recordRo: IUpdateRecordRo = {
         fieldKeyType: FieldKeyType.Id,
@@ -120,7 +124,19 @@ export const KanbanContainer = () => {
         },
       };
 
-      if (targetCardId != null) {
+      // Drag a card to the end of another stack
+      if (targetCardId == null) {
+        if (targetIndex !== 0) {
+          const lastTargetCardId = targetCards?.[targetIndex - 1]?.id;
+          if (lastTargetCardId != null) {
+            recordRo.order = {
+              viewId,
+              anchorId: lastTargetCardId,
+              position: 'after',
+            };
+          }
+        }
+      } else {
         recordRo.order = {
           viewId,
           anchorId: targetCardId,
@@ -164,7 +180,7 @@ export const KanbanContainer = () => {
                       stack={stack}
                       cards={cardMap[stackId] ?? EMPTY_LIST}
                       setCardMap={setCardMapInner}
-                      disabled={isUserField}
+                      disabled={!isSingleSelectField}
                       isCollapsed={isCollapsed}
                     />
                   );
@@ -174,7 +190,7 @@ export const KanbanContainer = () => {
             );
           }}
         </Droppable>
-        {stackCreatable && !isUserField && (
+        {stackCreatable && isSingleSelectField && (
           <div className="pr-2">
             <KanbanStackCreator />
           </div>

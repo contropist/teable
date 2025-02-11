@@ -5,19 +5,20 @@ import {
   AppProvider,
   FieldProvider,
   SessionProvider,
+  ShareViewProxy,
   ViewProvider,
+  ShareViewContext,
 } from '@teable/sdk/context';
 import { getWsPath } from '@teable/sdk/context/app/useConnection';
+import { addQueryParamsToWebSocketUrl } from '@teable/sdk/utils';
 import Head from 'next/head';
+import { useRouter } from 'next/router';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSdkLocale } from '@/features/app/hooks/useSdkLocale';
 import { AppLayout } from '@/features/app/layouts';
-import { addQueryParamsToWebSocketUrl } from '@/features/app/utils/socket-url';
 import { ShareTablePermissionProvider } from './ShareTablePermissionProvider';
 import { ShareView } from './ShareView';
-import { ShareViewPageContext } from './ShareViewPageContext';
-import { ViewProxy } from './ViewProxy';
 
 export interface IShareViewPageProps {
   shareViewData: ShareViewGetVo;
@@ -29,6 +30,8 @@ export const ShareViewPage = (props: IShareViewPageProps) => {
   const sdkLocale = useSdkLocale();
   const { i18n } = useTranslation();
 
+  const { query } = useRouter();
+
   const wsPath = useMemo(() => {
     if (typeof window === 'object') {
       return addQueryParamsToWebSocketUrl(getWsPath(), { shareId });
@@ -37,12 +40,17 @@ export const ShareViewPage = (props: IShareViewPageProps) => {
   }, [shareId]);
 
   return (
-    <ShareViewPageContext.Provider value={props.shareViewData}>
-      <Head>
-        <title>{view?.name ?? 'Teable'}</title>
-      </Head>
-      <AppLayout>
-        <AppProvider lang={i18n.language} wsPath={wsPath} locale={sdkLocale}>
+    <AppProvider
+      lang={i18n.language}
+      wsPath={wsPath}
+      locale={sdkLocale}
+      forcedTheme={query.theme as string}
+    >
+      <ShareViewContext.Provider value={props.shareViewData}>
+        <Head>
+          <title>{view?.name ?? 'Teable'}</title>
+        </Head>
+        <AppLayout>
           <SessionProvider
             user={{
               id: ANONYMOUS_USER_ID,
@@ -52,6 +60,7 @@ export const ShareViewPage = (props: IShareViewPageProps) => {
               hasPassword: false,
               isAdmin: false,
             }}
+            disabledApi
           >
             <AnchorContext.Provider
               value={{
@@ -59,19 +68,21 @@ export const ShareViewPage = (props: IShareViewPageProps) => {
                 viewId,
               }}
             >
-              <ViewProvider serverData={[view]}>
-                <ViewProxy serverData={[view]}>
-                  <FieldProvider serverSideData={fields}>
-                    <ShareTablePermissionProvider>
-                      <ShareView />
-                    </ShareTablePermissionProvider>
-                  </FieldProvider>
-                </ViewProxy>
-              </ViewProvider>
+              {view && (
+                <ViewProvider serverData={[view]}>
+                  <ShareViewProxy serverData={[view]}>
+                    <FieldProvider serverSideData={fields}>
+                      <ShareTablePermissionProvider>
+                        <ShareView />
+                      </ShareTablePermissionProvider>
+                    </FieldProvider>
+                  </ShareViewProxy>
+                </ViewProvider>
+              )}
             </AnchorContext.Provider>
           </SessionProvider>
-        </AppProvider>
-      </AppLayout>
-    </ShareViewPageContext.Provider>
+        </AppLayout>
+      </ShareViewContext.Provider>
+    </AppProvider>
   );
 };

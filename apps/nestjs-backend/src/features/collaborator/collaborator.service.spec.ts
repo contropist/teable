@@ -1,7 +1,8 @@
 import type { TestingModule } from '@nestjs/testing';
 import { Test } from '@nestjs/testing';
-import { RoleType, SpaceRole, getPermissions } from '@teable/core';
+import { Role, getPermissions } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
+import { CollaboratorType, PrincipalType } from '@teable/openapi';
 import { ClsService } from 'nestjs-cls';
 import { mockDeep } from 'vitest-mock-extended';
 import { GlobalModule } from '../../global/global.module';
@@ -31,42 +32,67 @@ describe('CollaboratorService', () => {
     prismaService.txClient.mockImplementation(() => {
       return prismaService;
     });
+
+    prismaService.$tx.mockImplementation(async (fn, _options) => {
+      return await fn(prismaService);
+    });
   });
 
   describe('createSpaceCollaborator', () => {
     it('should create collaborator correctly', async () => {
       prismaService.collaborator.count.mockResolvedValue(0);
-
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      prismaService.base.findMany.mockResolvedValue([{ id: 'base1' }] as any);
+      prismaService.collaborator.deleteMany.mockResolvedValue({ count: 0 });
       await clsService.runWith(
         {
           user: mockUser,
           tx: {},
-          permissions: getPermissions(RoleType.Space, SpaceRole.Owner),
+          permissions: getPermissions(Role.Owner),
         },
         async () => {
-          await collaboratorService.createSpaceCollaborator(
-            mockUser.id,
-            mockSpace.id,
-            SpaceRole.Owner
-          );
+          await collaboratorService.createSpaceCollaborator({
+            collaborators: [
+              {
+                principalId: mockUser.id,
+                principalType: PrincipalType.User,
+              },
+            ],
+            role: Role.Owner,
+            spaceId: mockSpace.id,
+          });
         }
       );
 
-      expect(prismaService.collaborator.create).toBeCalledWith({
-        data: {
-          spaceId: mockSpace.id,
-          roleName: SpaceRole.Owner,
-          userId: mockUser.id,
-          createdBy: mockUser.id,
+      expect(prismaService.collaborator.deleteMany).toBeCalledWith({
+        where: {
+          OR: [
+            {
+              principalId: mockUser.id,
+              principalType: PrincipalType.User,
+            },
+          ],
+          resourceId: { in: ['base1'] },
+          resourceType: CollaboratorType.Base,
         },
       });
+      expect(prismaService.$executeRawUnsafe).toBeCalled();
     });
 
     it('should throw error if exists', async () => {
       prismaService.collaborator.count.mockResolvedValue(1);
 
       await expect(
-        collaboratorService.createSpaceCollaborator(mockUser.id, mockSpace.id, SpaceRole.Owner)
+        collaboratorService.createSpaceCollaborator({
+          collaborators: [
+            {
+              principalId: mockUser.id,
+              principalType: PrincipalType.User,
+            },
+          ],
+          role: Role.Owner,
+          spaceId: mockSpace.id,
+        })
       ).rejects.toThrow('has already existed in space');
     });
   });

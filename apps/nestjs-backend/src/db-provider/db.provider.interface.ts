@@ -1,12 +1,16 @@
-import type { DriverClient, IFilter, ISortItem } from '@teable/core';
+import type { DriverClient, FieldType, IFilter, ILookupOptionsVo, ISortItem } from '@teable/core';
 import type { Prisma } from '@teable/db-main-prisma';
-import type { IAggregationField } from '@teable/openapi';
+import type { IAggregationField, ISearchIndexByQueryRo, TableIndex } from '@teable/openapi';
 import type { Knex } from 'knex';
 import type { IFieldInstance } from '../features/field/model/factory';
+import type { DateFieldDto } from '../features/field/model/field-dto/date-field.dto';
 import type { SchemaType } from '../features/field/util';
 import type { IAggregationQueryInterface } from './aggregation-query/aggregation-query.interface';
+import type { BaseQueryAbstract } from './base-query/abstract';
 import type { IFilterQueryInterface } from './filter-query/filter-query.interface';
 import type { IGroupQueryExtra, IGroupQueryInterface } from './group-query/group-query.interface';
+import type { IndexBuilderAbstract } from './index-query/index-abstract-builder';
+import type { IntegrityQueryAbstract } from './integrity-query/abstract';
 import type { ISortQueryInterface } from './sort-query/sort-query.interface';
 
 export type IFilterQueryExtra = {
@@ -19,12 +23,21 @@ export type ISortQueryExtra = {
   [key: string]: unknown;
 };
 
-export type IAggregationQueryExtra = { filter?: IFilter } & IFilterQueryExtra;
+export type IAggregationQueryExtra = { filter?: IFilter; groupBy?: string[] } & IFilterQueryExtra;
+
+export type ICalendarDailyCollectionQueryProps = {
+  startDate: string;
+  endDate: string;
+  startField: DateFieldDto;
+  endField: DateFieldDto;
+};
 
 export interface IDbProvider {
   driver: DriverClient;
 
   createSchema(schemaName: string): string[] | undefined;
+
+  dropSchema(schemaName: string): string | undefined;
 
   generateDbTableName(baseId: string, name: string): string;
 
@@ -36,6 +49,22 @@ export interface IDbProvider {
 
   dropColumn(tableName: string, columnName: string): string[];
 
+  updateJsonColumn(
+    tableName: string,
+    columnName: string,
+    id: string,
+    key: string,
+    value: string
+  ): string;
+
+  updateJsonArrayColumn(
+    tableName: string,
+    columnName: string,
+    id: string,
+    key: string,
+    value: string
+  ): string;
+
   // sql response format: { name: string }[], name for columnName.
   columnInfo(tableName: string): string;
 
@@ -44,6 +73,8 @@ export interface IDbProvider {
     columnName: string,
     prisma: Prisma.TransactionClient
   ): Promise<boolean>;
+
+  checkTableExist(tableName: string): string;
 
   dropColumnAndIndex(tableName: string, columnName: string, indexName: string): string[];
 
@@ -103,13 +134,49 @@ export interface IDbProvider {
 
   searchQuery(
     originQueryBuilder: Knex.QueryBuilder,
-    fieldMap?: { [fieldId: string]: IFieldInstance },
-    search?: string[]
+    searchFields: IFieldInstance[],
+    tableIndex: TableIndex[],
+    search: [string, string?, boolean?]
   ): Knex.QueryBuilder;
+
+  searchIndexQuery(
+    originQueryBuilder: Knex.QueryBuilder,
+    dbTableName: string,
+    searchField: IFieldInstance[],
+    searchIndexRo: Partial<ISearchIndexByQueryRo>,
+    tableIndex: TableIndex[],
+    baseSortIndex?: string,
+    setFilterQuery?: (qb: Knex.QueryBuilder) => void,
+    setSortQuery?: (qb: Knex.QueryBuilder) => void
+  ): Knex.QueryBuilder;
+
+  searchCountQuery(
+    originQueryBuilder: Knex.QueryBuilder,
+    searchField: IFieldInstance[],
+    search: [string, string?, boolean?],
+    tableIndex: TableIndex[]
+  ): Knex.QueryBuilder;
+
+  searchIndex(): IndexBuilderAbstract;
 
   shareFilterCollaboratorsQuery(
     originQueryBuilder: Knex.QueryBuilder,
     dbFieldName: string,
     isMultipleCellValue?: boolean | null
   ): void;
+
+  baseQuery(): BaseQueryAbstract;
+
+  integrityQuery(): IntegrityQueryAbstract;
+
+  calendarDailyCollectionQuery(
+    qb: Knex.QueryBuilder,
+    props: ICalendarDailyCollectionQueryProps
+  ): Knex.QueryBuilder;
+
+  lookupOptionsQuery(optionsKey: keyof ILookupOptionsVo, value: string): string;
+
+  optionsQuery(type: FieldType, optionsKey: string, value: string): string;
+
+  searchBuilder(qb: Knex.QueryBuilder, search: [string, string][]): Knex.QueryBuilder;
 }

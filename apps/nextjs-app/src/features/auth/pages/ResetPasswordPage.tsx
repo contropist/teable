@@ -1,13 +1,12 @@
 import { useMutation } from '@tanstack/react-query';
+import type { HttpError } from '@teable/core';
 import { resetPassword } from '@teable/openapi';
 import { passwordSchema } from '@teable/openapi/src/auth/types';
-import { Spin } from '@teable/ui-lib/base';
+import { Spin, Error } from '@teable/ui-lib/base';
 import { Button, Input, Label, Separator, useToast } from '@teable/ui-lib/shadcn';
 import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
 import { useState } from 'react';
-import { fromZodError } from 'zod-validation-error';
-import { Error } from '@/components/Error';
 import { authConfig } from '@/features/i18n/auth.config';
 import { LayoutMain } from '../components/LayoutMain';
 
@@ -34,6 +33,9 @@ export const ResetPasswordPage = () => {
         router.push('/auth/login');
       }, 2000);
     },
+    onError: (err) => {
+      setError((err as HttpError).message);
+    },
   });
 
   const passwordOnChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -49,7 +51,7 @@ export const ResetPasswordPage = () => {
     }
     const res = passwordSchema.safeParse(value);
     if (!res.success) {
-      return setError(fromZodError(res.error).message);
+      return setError(t('common:password.setInvalid'));
     }
   };
 

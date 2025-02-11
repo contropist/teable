@@ -19,7 +19,7 @@ import {
   isNotEmpty,
 } from '@teable/core';
 import type { Knex } from 'knex';
-import { get, includes, invert, isObject } from 'lodash';
+import { includes, invert, isObject } from 'lodash';
 import type { IFieldInstance } from '../../features/field/model/factory';
 import type { IFilterQueryExtra } from '../db.provider.interface';
 import type { AbstractCellValueFilter } from './cell-value-filter.abstract';
@@ -28,16 +28,12 @@ import type { IFilterQueryInterface } from './filter-query.interface';
 export abstract class AbstractFilterQuery implements IFilterQueryInterface {
   private logger = new Logger(AbstractFilterQuery.name);
 
-  protected _table: string;
-
   constructor(
     protected readonly originQueryBuilder: Knex.QueryBuilder,
     protected readonly fields?: { [fieldId: string]: IFieldInstance },
     protected readonly filter?: IFilter,
     protected readonly extra?: IFilterQueryExtra
-  ) {
-    this._table = get(originQueryBuilder, ['_single', 'table']);
-  }
+  ) {}
 
   appendQueryBuilder(): Knex.QueryBuilder {
     this.preProcessRemoveNullAndReplaceMe(this.filter);
@@ -169,7 +165,10 @@ export abstract class AbstractFilterQuery implements IFilterQueryInterface {
   ): void {
     const { value } = filterItem;
 
-    if (field.type === FieldType.User && replaceUserId) {
+    if (
+      [FieldType.User, FieldType.CreatedBy, FieldType.LastModifiedBy].includes(field.type) &&
+      replaceUserId
+    ) {
       filterItem.value = Array.isArray(value)
         ? (value.map((v) => (isMeTag(v as string) ? replaceUserId : v)) as ILiteralValueList)
         : isMeTag(value as string)

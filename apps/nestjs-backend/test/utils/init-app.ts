@@ -1,4 +1,5 @@
 /* eslint-disable sonarjs/no-duplicate-string */
+import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WsAdapter } from '@nestjs/platform-ws';
@@ -24,6 +25,9 @@ import type {
   IRecordsVo,
   IUpdateRecordRo,
   ITableFullVo,
+  ICreateSpaceRo,
+  ICreateBaseRo,
+  IRecordInsertOrderRo,
 } from '@teable/openapi';
 import {
   axios,
@@ -37,16 +41,24 @@ import {
   createField as apiCreateField,
   deleteField as apiDeleteField,
   convertField as apiConvertField,
+  duplicateRecord as apiDuplicateRecord,
   getFields as apiGetFields,
   getField as apiGetField,
   getViewList as apiGetViewList,
-  getViewById as apiGetViewById,
+  getView as apiGetViewById,
   updateViewColumnMeta as apiSetViewColumnMeta,
   createTable as apiCreateTable,
-  deleteTableArbitrary as apiDeleteTableArbitrary,
+  deleteTable as apiDeleteTable,
+  permanentDeleteTable as apiPermanentDeleteTable,
   getTableById as apiGetTableById,
   updateViewFilter as apiSetViewFilter,
   createView as apiCreateView,
+  createSpace as apiCreateSpace,
+  deleteSpace as apiDeleteSpace,
+  createBase as apiCreateBase,
+  deleteBase as apiDeleteBase,
+  permanentDeleteSpace as apiPermanentDeleteSpace,
+  permanentDeleteBase as apiPermanentDeleteBase,
 } from '@teable/openapi';
 import { json, urlencoded } from 'express';
 import { AppModule } from '../../src/app.module';
@@ -54,6 +66,7 @@ import type { IBaseConfig } from '../../src/configs/base.config';
 import { baseConfig } from '../../src/configs/base.config';
 import { SessionHandleService } from '../../src/features/auth/session/session-handle.service';
 import { NextService } from '../../src/features/next/next.service';
+import { TableIndexService } from '../../src/features/table/table-index.service';
 import { GlobalExceptionFilter } from '../../src/filter/global-exception.filter';
 import { WsGateway } from '../../src/ws/ws.gateway';
 import { DevWsGateway } from '../../src/ws/ws.gateway.dev';
@@ -101,6 +114,7 @@ export async function initApp() {
   process.env.STORAGE_PREFIX = url;
   const baseConfigService = app.get(baseConfig.KEY) as IBaseConfig;
   baseConfigService.storagePrefix = url;
+  baseConfigService.recordHistoryDisabled = true;
 
   axios.defaults.baseURL = url + '/api';
 
@@ -133,6 +147,10 @@ export async function initApp() {
   };
 }
 
+export async function getTableIndexService(app: INestApplication) {
+  return app.get<TableIndexService>(TableIndexService);
+}
+
 export async function createTable(baseId: string, tableVo: ICreateTableRo, expectStatus = 201) {
   try {
     const res = await apiCreateTable(baseId, tableVo);
@@ -149,7 +167,21 @@ export async function createTable(baseId: string, tableVo: ICreateTableRo, expec
 
 export async function deleteTable(baseId: string, tableId: string, expectStatus?: number) {
   try {
-    const res = await apiDeleteTableArbitrary(baseId, tableId);
+    const res = await apiDeleteTable(baseId, tableId);
+    expectStatus && expect(res.status).toEqual(expectStatus);
+
+    return res.data;
+  } catch (e: unknown) {
+    if (expectStatus && (e as HttpError).status !== expectStatus) {
+      throw e;
+    }
+    return {} as IRecord;
+  }
+}
+
+export async function permanentDeleteTable(baseId: string, tableId: string, expectStatus?: number) {
+  try {
+    const res = await apiPermanentDeleteTable(baseId, tableId);
     expectStatus && expect(res.status).toEqual(expectStatus);
 
     return res.data;
@@ -290,6 +322,25 @@ export async function getRecords(tableId: string, query?: IGetRecordsRo): Promis
   return result.data;
 }
 
+export async function duplicateRecord(
+  tableId: string,
+  recordId: string,
+  order: IRecordInsertOrderRo,
+  expectStatus = 201
+) {
+  try {
+    const res = await apiDuplicateRecord(tableId, recordId, order);
+
+    expect(res.status).toEqual(expectStatus);
+    return res.data;
+  } catch (e: unknown) {
+    if ((e as HttpError).status !== expectStatus) {
+      throw e;
+    }
+    return {} as ICreateRecordsVo;
+  }
+}
+
 export async function createRecords(
   tableId: string,
   recordsRo: ICreateRecordsRo,
@@ -364,9 +415,10 @@ export async function convertField(
 export async function getFields(
   tableId: string,
   viewId?: string,
-  filterHidden?: boolean
+  filterHidden?: boolean,
+  projection?: string[]
 ): Promise<IFieldVo[]> {
-  const result = await apiGetFields(tableId, { viewId, filterHidden });
+  const result = await apiGetFields(tableId, { viewId, filterHidden, projection });
 
   return result.data;
 }
@@ -415,5 +467,35 @@ export async function updateViewColumnMeta(
 
 export async function updateViewFilter(tableId: string, viewId: string, filterRo: IFilterRo) {
   const result = await apiSetViewFilter(tableId, viewId, filterRo);
+  return result.data;
+}
+
+export async function createSpace(spaceRo: ICreateSpaceRo) {
+  const result = await apiCreateSpace(spaceRo);
+  return result.data;
+}
+
+export async function deleteSpace(spaceId: string) {
+  const result = await apiDeleteSpace(spaceId);
+  return result.data;
+}
+
+export async function permanentDeleteSpace(spaceId: string) {
+  const result = await apiPermanentDeleteSpace(spaceId);
+  return result.data;
+}
+
+export async function createBase(baseRo: ICreateBaseRo) {
+  const result = await apiCreateBase(baseRo);
+  return result.data;
+}
+
+export async function deleteBase(baseId: string) {
+  const result = await apiDeleteBase(baseId);
+  return result.data;
+}
+
+export async function permanentDeleteBase(baseId: string) {
+  const result = await apiPermanentDeleteBase(baseId);
   return result.data;
 }

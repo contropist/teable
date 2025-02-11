@@ -1,6 +1,8 @@
 {
   "brand": "Teable",
   "actions": {
+    "add": "添加",
+    "title": "操作",
     "save": "保存",
     "doNotSave": "不保存",
     "submit": "提交",
@@ -15,11 +17,14 @@
     "zoomIn": "放大",
     "zoomOut": "缩小",
     "back": "返回",
+    "remove": "移除",
     "saveSucceed": "保存成功！",
     "submitSucceed": "提交成功！",
     "editSucceed": "编辑成功！",
     "updateSucceed": "更新成功！",
     "deleteSucceed": "删除成功！",
+    "resetSucceed": "清空成功！",
+    "restoreSucceed": "恢复成功！",
     "loading": "加载中...",
     "refreshPage": "刷新页面",
     "yesDelete": "是，删除",
@@ -29,11 +34,22 @@
     "upgrade": "升级",
     "search": "搜索",
     "loadMore": "加载更多",
-    "collapseSidebar": "折叠侧边栏"
+    "collapseSidebar": "折叠侧边栏",
+    "restore": "恢复",
+    "permanentDelete": "永久删除",
+    "globalSearch": "全局搜索",
+    "fieldSearch": "字段搜索",
+    "tableIndex": "索引",
+    "showAllRow": "显示全部",
+    "hideNotMatchRow": "仅显示匹配行",
+    "more": "更多"
   },
   "quickAction": {
     "title": "快捷搜索...",
     "placeHolder": "输入命令或进行搜索..."
+  },
+  "password": {
+    "setInvalid": "设置的密码无效，至少需要8个字符，且必须包含至少一个字母和一个数字。"
   },
   "settings": {
     "title": "设置",
@@ -57,8 +73,7 @@
       "changePasswordError": {
         "disMatch": "您的新密码不匹配。",
         "equal": "您的新密码必须与当前密码不同。",
-        "invalid": "您当前的密码无效。",
-        "invalidNew": "您的新密码无效，至少需要8个字符。"
+        "invalid": "您当前的密码无效。"
       },
       "changePasswordSuccess": {
         "title": "🎉 密码更改成功。",
@@ -72,11 +87,29 @@
         "confirm": "确认您的密码"
       },
       "addPasswordError": {
-        "disMatch": "您的密码不匹配。",
-        "invalid": "您的密码无效，至少需要8个字符。"
+        "disMatch": "您的密码不匹配。"
       },
       "addPasswordSuccess": {
         "title": "🎉 密码添加成功。"
+      },
+      "changeEmail": {
+        "title": "更改电子邮件",
+        "desc": "请输入您的当前密码和您的电子邮件。",
+        "current": "输入您的当前密码",
+        "new": "输入您的新电子邮件",
+        "code": "输入验证码",
+        "getCode": "获取验证码",
+        "error": {
+          "invalidCode": "验证码无效",
+          "invalidPassword": "密码无效",
+          "invalidConflict": "新电子邮件已注册",
+          "invalidSameEmail": "新电子邮件与当前电子邮件相同"
+        },
+        "success": {
+          "title": "🎉 电子邮件更改成功。",
+          "desc": "您将在2秒内重定向到登录页面。",
+          "sendSuccess": "验证码发送成功。"
+        }
       }
     },
     "notify": {
@@ -87,10 +120,12 @@
     "setting": {
       "title": "我的设置",
       "theme": "主题",
-      "themeDesc": "选择仪表板的主题。",
+      "themeDesc": "选择应用主题。",
       "dark": "深色",
       "light": "浅色",
-      "system": "系统"
+      "version": "应用版本",
+      "system": "系统",
+      "language": "语言"
     },
     "nav": {
       "settings": "设置",
@@ -121,7 +156,11 @@
     "adminPanel": "管理面板",
     "license": "许可证",
     "instanceId": "实例 ID",
-    "beta": "测试版"
+    "beta": "测试版",
+    "trash": "回收站",
+    "global": "全局",
+    "organizationPanel": "组织管理面板",
+    "unknownError": "未知错误"
   },
   "level": {
     "free": "免费版",
@@ -129,11 +168,12 @@
     "pro": "专业版",
     "enterprise": "企业版"
   },
-  "noResult": "无结果。",
+  "noResult": "无结果",
   "untitled": "未命名",
   "name": "名称",
   "description": "描述",
   "required": "必填",
+  "atLeastOne": "至少保留一个{{noun}}",
   "guide": {
     "prev": "上一步",
     "next": "下一步",
@@ -146,7 +186,7 @@
     "createTableTooltipTitle": "创建表格",
     "createTableTooltipContent": "表格是一种结构化数据存储方式，用于存储应用内相关数据的集合。",
     "createViewTooltipTitle": "创建视图",
-    "createViewTooltipContent": "目前，用户可以创建表格和表单视图，未来的版本计划还包括相册、看板和日历视图。<br></br>这种多样性为用户提供了一个全面的工具，用于处理各种数据管理任务。",
+    "createViewTooltipContent": "目前，用户可以创建表格、画册、看板和表单视图，未来的版本计划还包括日历视图。<br></br>这种多样性为用户提供了一个全面的工具，用于处理各种数据管理任务。",
     "viewFilteringTooltipTitle": "记录筛选",
     "viewFilteringTooltipContent": "视图的核心功能之一是能够根据您设置的条件从视图中过滤掉记录。<br></br>当根据条件过滤掉记录时，它不会被删除，它只是在您用于查看表的特定视图中隐藏。",
     "viewSortingTooltipTitle": "记录排序",
@@ -163,7 +203,7 @@
       "title": "{{spaceName}} 空间分享",
       "desc": "这个空间有<b>{{count}} 个协作者</b>。添加一个空间协作者将使他们能够访问该空间内的所有数据库。",
       "tabEmail": "通过电子邮件邀请",
-      "emailPlaceholder": "通过电子邮件邀请更多空间协作者",
+      "emailPlaceholder": "通过电子邮件邀请更多协作者",
       "tabLink": "通过链接邀请",
       "linkPlaceholder": "创建一个邀请链接，让任何打开它的人获得<0/>权限。",
       "emailSend": "发送邀请",
@@ -176,6 +216,17 @@
       "linkCreatedTime": "创建于 {{createdTime}}",
       "linkCopySuccess": "链接已复制",
       "linkRemove": "移除链接"
+    },
+    "base": {
+      "title": "分享{{baseName}}",
+      "desc_one": "此数据库与 {{count}} 位协作者共享。",
+      "desc_other": "此数据库与 {{count}} 位协作者共享。",
+      "baseTitle": "此数据库协作者",
+      "collaboratorSearchPlaceholder": "通过姓名或电子邮件查找数据库协作者"
+    },
+    "addOrgCollaborator": {
+      "title": "添加组织协作者",
+      "placeholder": "选择组织成员或部门"
     }
   },
   "help": {
@@ -193,7 +244,7 @@
     "levelTips": "当前空间使用的是{{level}}计划",
     "spaceSubscriptionModal": {
       "title": "升级空间站的订阅计划",
-      "description": "您只能更改具有「拥有者」权限的空间站"
+      "description": "您只能升级具有「可管理」权限的空间站"
     },
     "status": {
       "active": "已激活",
@@ -215,7 +266,43 @@
       "allowSpaceInvitation": "允许发送空间邀请",
       "allowSpaceInvitationDescription": "关闭此选项将禁止除管理员以外的用户邀请他人加入空间。开启此选项后，即使新账户注册已被禁用，仍允许被直接邀请的用户创建账户。",
       "allowSpaceCreation": "允许所有人创建新的空间",
-      "allowSpaceCreationDescription": "关闭此选项将禁止除管理员以外的用户创建新的空间。"
+      "allowSpaceCreationDescription": "关闭此选项将禁止除管理员以外的用户创建新的空间。",
+      "enableEmailVerification": "启用邮箱验证",
+      "enableEmailVerificationDescription": "关闭此选项将禁止用户创建新账户时无需验证邮箱地址。",
+      "generalSettings": "通用配置",
+      "aiSettings": "AI 配置",
+      "ai": {
+        "name": "名称",
+        "nameDescription": "名称可自定义，用于区分不同的模型提供商",
+        "enable": "启用 AI",
+        "enableDescription": "启用当前实例的 AI 功能，所有用户将能够使用 AI 功能",
+        "updateLLMProvider": "更新模型提供商",
+        "addProvider": "添加模型提供商",
+        "addProviderDescription": "添加一个新的模型提供商到列表",
+        "providerType": "提供商类型",
+        "baseUrl": "基础 URL",
+        "apiKey": "API 密钥",
+        "baseUrlDescription": "模型提供商的基础 URL",
+        "apiKeyDescription": "模型提供商的 API 密钥",
+        "models": "模型",
+        "modelsDescription": "模型提供商支持的模型",
+        "baseUrlRequired": "基础 URL 是必需的",
+        "fetchModelListError": "无法获取模型列表",
+        "provider": "模型提供商",
+        "providerDescription": "要使用的模型提供商",
+        "modelPreferences": "模型偏好",
+        "modelPreferencesDescription": "模型提供商的模型偏好",
+        "embeddingModel": "嵌入模型",
+        "embeddingModelDescription": "要使用的嵌入模型",
+        "translationModel": "翻译模型",
+        "translationModelDescription": "要使用的翻译模型",
+        "codingModel": "编码模型",
+        "codingModelDescription": "要使用的编码模型",
+        "configUpdated": "AI 配置已更新",
+        "noModelFound": "未找到模型",
+        "searchModel": "搜索模型...",
+        "selectModel": "选择模型..."
+      }
     }
   },
   "notification": {
@@ -224,8 +311,44 @@
     "read": "已读",
     "markAs": "将此通知标记为{{status}}",
     "markAllAsRead": "全部标记为已读",
-    "noUnread": "没有未读通知",
+    "noUnread": "没有{{status}}通知",
     "changeSetting": "更改页面通知设置",
-    "new": "新消息{{count}}条"
+    "new": "新消息{{count}}条",
+    "showMore": "显示更多"
+  },
+  "role": {
+    "title": {
+      "owner": "可管理",
+      "creator": "可搭建",
+      "editor": "可编辑",
+      "commenter": "可查看与评论",
+      "viewer": "可查看"
+    },
+    "description": {
+      "owner": "具有完全配置和编辑数据库、自动化、权限矩阵、管理空间设置和计费的权限",
+      "creator": "具有完全配置和编辑数据库、自动化和启用权限矩阵的权限",
+      "editor": "可以编辑记录和视图，不能配置表格或字段",
+      "commenter": "可以查看和评论记录，不能编辑记录",
+      "viewer": "仅可查看记录，不能编辑或评论记录"
+    }
+  },
+  "trash": {
+    "type": "类型",
+    "resetTrash": "清空回收站",
+    "deletedBy": "操作者",
+    "deletedTime": "删除时间",
+    "fromSpace": "来自 \"{{name}}\" 空间",
+    "permanentDeleteTips": "确定要永久删除 \"{{name}}\" {{resource}}吗？",
+    "resetTrashConfirm": "确定要清空回收站吗？"
+  },
+  "pluginCenter": {
+    "pluginUrlEmpty": "插件未设置 URL",
+    "install": "安装",
+    "publisher": "发布者",
+    "lastUpdated": "最后更新",
+    "pluginNotFound": "插件未找到",
+    "pluginEmpty": {
+      "title": "暂无插件"
+    }
   }
 }

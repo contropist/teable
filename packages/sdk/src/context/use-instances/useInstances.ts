@@ -1,9 +1,9 @@
 import { isEqual } from 'lodash';
-import { useCallback, useContext, useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { Doc, Query } from 'sharedb/lib/client';
-import { AppContext } from '../app/AppContext';
+import { useConnection } from '../../hooks/use-connection';
 import { OpListenersManager } from './opListener';
-import type { IInstanceAction } from './reducer';
+import type { IInstanceAction, IInstanceState } from './reducer';
 import { instanceReducer } from './reducer';
 
 export interface IUseInstancesProps<T, R> {
@@ -24,7 +24,7 @@ const queryDestroy = (query: Query | undefined, cb?: () => void) => {
   query.once('ready', () => {
     query.destroy(() => {
       query.removeAllListeners();
-      query.results?.forEach((doc) => doc.listenerCount('op') === 0 && doc.destroy());
+      query.results?.forEach((doc) => doc.listenerCount('op batch') === 0 && doc.destroy());
       cb?.();
     });
   });
@@ -40,12 +40,16 @@ export function useInstances<T, R extends { id: string }>({
   factory,
   queryParams,
   initData,
-}: IUseInstancesProps<T, R>): R[] {
-  const { connection, connected } = useContext(AppContext);
+}: IUseInstancesProps<T, R>): IInstanceState<R> {
+  const { connection, connected } = useConnection();
   const [query, setQuery] = useState<Query<T>>();
   const [instances, dispatch] = useReducer(
-    (state: R[], action: IInstanceAction<T>) => instanceReducer(state, action, factory),
-    initData && !connected ? initData.map((data) => factory(data)) : []
+    (state: IInstanceState<R>, action: IInstanceAction<T>) =>
+      instanceReducer(state, action, factory),
+    {
+      instances: initData && !connected ? initData.map((data) => factory(data)) : [],
+      extra: undefined,
+    }
   );
 
   const opListeners = useRef<OpListenersManager<T>>(new OpListenersManager<T>(collection));
@@ -57,10 +61,11 @@ export function useInstances<T, R extends { id: string }>({
       query.query,
       localStorage.getItem('debug') && query.results.map((doc) => doc.data)
     );
+    console.log('extra ready ->', query.extra);
     if (!query.results) {
       return;
     }
-    dispatch({ type: 'ready', results: query.results });
+    dispatch({ type: 'ready', results: query.results, extra: query.extra });
     query.results.forEach((doc) => {
       opListeners.current.add(doc, (op) => {
         console.log(`${query.collection} on op:`, op, doc);
@@ -107,6 +112,11 @@ export function useInstances<T, R extends { id: string }>({
     dispatch({ type: 'move', docs, from, to });
   }, []);
 
+  const handleExtra = useCallback((extra: unknown) => {
+    console.log('extra', extra);
+    dispatch({ type: 'extra', extra });
+  }, []);
+
   useEffect(() => {
     setQuery((query) => {
       if (!collection || !connection) {
@@ -151,6 +161,10 @@ export function useInstances<T, R extends { id: string }>({
       );
     };
 
+    if (query.ready) {
+      readyListener();
+    }
+
     query.on('ready', readyListener);
 
     query.on('changed', changedListener);
@@ -161,14 +175,17 @@ export function useInstances<T, R extends { id: string }>({
 
     query.on('move', handleMove);
 
+    query.on('extra', handleExtra);
+
     return () => {
       query.removeListener('ready', readyListener);
       query.removeListener('changed', changedListener);
       query.removeListener('insert', handleInsert);
       query.removeListener('remove', handleRemove);
       query.removeListener('move', handleMove);
+      query.removeListener('extra', handleExtra);
     };
-  }, [query, handleInsert, handleRemove, handleMove, handleReady]);
+  }, [query, handleInsert, handleRemove, handleMove, handleReady, handleExtra]);
 
   return instances;
 }

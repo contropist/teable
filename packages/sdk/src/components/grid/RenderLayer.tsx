@@ -24,6 +24,7 @@ export interface IRenderLayerProps
     | 'width'
     | 'height'
     | 'columns'
+    | 'commentCountMap'
     | 'rowControls'
     | 'imageManager'
     | 'spriteManager'
@@ -32,6 +33,8 @@ export interface IRenderLayerProps
     | 'columnStatistics'
     | 'groupCollection'
     | 'rowIndexVisible'
+    | 'searchCursor'
+    | 'searchHitIndex'
     | 'collaborators'
     | 'columnHeaderVisible'
     | 'isMultiSelectionEnable'
@@ -66,6 +69,7 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
     width,
     height,
     columns,
+    commentCountMap,
     isEditing,
     rowControls,
     visibleRegion,
@@ -74,6 +78,8 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
     activeCell,
     activeCellBound,
     collaborators,
+    searchCursor,
+    searchHitIndex,
     dragState,
     scrollState,
     columnFreezeState,
@@ -139,6 +145,7 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
       width,
       height,
       columns,
+      commentCountMap,
       isEditing,
       rowControls,
       visibleRegion,
@@ -147,6 +154,8 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
       activeCell,
       activeCellBound,
       collaborators,
+      searchCursor,
+      searchHitIndex,
       dragState,
       scrollState,
       columnFreezeState,
@@ -180,6 +189,7 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
     width,
     height,
     columns,
+    commentCountMap,
     isEditing,
     rowControls,
     visibleRegion,
@@ -188,6 +198,8 @@ export const RenderLayer: FC<React.PropsWithChildren<IRenderLayerProps>> = (prop
     activeCell,
     activeCellBound,
     collaborators,
+    searchCursor,
+    searchHitIndex,
     dragState,
     mouseState,
     scrollState,

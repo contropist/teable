@@ -20,6 +20,7 @@ import type {
   RootContext,
   StringLiteralContext,
   FieldReferenceCurlyContext,
+  UnaryOpContext,
 } from './parser/Formula';
 import type { FormulaVisitor } from './parser/FormulaVisitor';
 import { TypedValue } from './typed-value';
@@ -34,7 +35,8 @@ export class EvalVisitor
   private readonly converter = new TypedValueConverter();
   constructor(
     private dependencies: { [fieldId: string]: FieldCore },
-    private record?: IRecord
+    private record?: IRecord,
+    private timeZone = 'UTC'
   ) {
     super();
   }
@@ -45,8 +47,38 @@ export class EvalVisitor
 
   visitStringLiteral(ctx: StringLiteralContext): any {
     // Extract and return the string value without quotes
-    const value = ctx.text.slice(1, -1);
-    return new TypedValue(value, CellValueType.String);
+    const quotedString = ctx.text;
+    const rawString = quotedString.slice(1, -1);
+    // Handle escape characters
+    const unescapedString = this.unescapeString(rawString);
+    return new TypedValue(unescapedString, CellValueType.String);
+  }
+
+  private unescapeString(str: string): string {
+    return str.replace(/\\(.)/g, (_, char) => {
+      switch (char) {
+        case 'n':
+          return '\n';
+        case 'r':
+          return '\r';
+        case 't':
+          return '\t';
+        case 'b':
+          return '\b';
+        case 'f':
+          return '\f';
+        case 'v':
+          return '\v';
+        case '\\':
+          return '\\';
+        case '"':
+          return '"';
+        case "'":
+          return "'";
+        default:
+          return '\\' + char;
+      }
+    });
   }
 
   visitIntegerLiteral(ctx: IntegerLiteralContext): any {
@@ -141,14 +173,6 @@ export class EvalVisitor
       return typedValue;
     }
 
-    if (
-      [CellValueType.Number, CellValueType.Boolean, CellValueType.String].includes(
-        field.cellValueType
-      )
-    ) {
-      return typedValue;
-    }
-
     if (field.isMultipleCellValue && field.cellValueType === CellValueType.Number) {
       if (!typedValue.value?.length) return null;
       if (typedValue.value.length > 1) {
@@ -159,7 +183,43 @@ export class EvalVisitor
       return new TypedValue(Number(typedValue.value[0]), CellValueType.Number);
     }
 
+    if (
+      [CellValueType.Number, CellValueType.Boolean, CellValueType.String].includes(
+        field.cellValueType
+      )
+    ) {
+      return typedValue;
+    }
+
     return new TypedValue(field.cellValue2String(typedValue.value), CellValueType.String);
+  }
+
+  private transformUnaryNodeValue(typedValue: TypedValue) {
+    if (!typedValue.field) {
+      return typedValue;
+    }
+
+    const { cellValueType, isMultipleCellValue } = typedValue.field;
+
+    if (cellValueType !== CellValueType.Number) return null;
+
+    if (isMultipleCellValue) {
+      if (!typedValue.value?.length) return null;
+      if (typedValue.value.length > 1) {
+        throw new TypeError(
+          'Cannot perform mathematical calculations on an array with more than one numeric element.'
+        );
+      }
+      return new TypedValue(Number(typedValue.value[0]), CellValueType.Number);
+    }
+    return typedValue;
+  }
+
+  visitUnaryOp(ctx: UnaryOpContext) {
+    const expr = ctx.expr();
+    const typedValue = this.visit(expr);
+    const value = this.transformUnaryNodeValue(typedValue)?.value ?? null;
+    return new TypedValue(value ? -value : null, CellValueType.Number);
   }
 
   visitBinaryOp(ctx: BinaryOpContext) {
@@ -167,8 +227,8 @@ export class EvalVisitor
     const rightNode = ctx.expr(1);
     const left = this.visit(leftNode)!;
     const right = this.visit(rightNode)!;
-    const lv = this.transformNodeValue(left, ctx)?.value;
-    const rv = this.transformNodeValue(right, ctx)?.value;
+    const lv = this.transformNodeValue(left, ctx)?.value ?? null;
+    const rv = this.transformNodeValue(right, ctx)?.value ?? null;
 
     const valueType = this.getBinaryOpValueType(ctx, left, right);
     let value: any;
@@ -237,7 +297,11 @@ export class EvalVisitor
 
   private createTypedValueByField(field: FieldCore) {
     let value: any = this.record ? this.record.fields[field.id] : null;
-    if (value == null || field.cellValueType !== CellValueType.String) {
+
+    if (
+      value == null ||
+      ![CellValueType.String, CellValueType.DateTime].includes(field.cellValueType)
+    ) {
       return new TypedValue(value, field.cellValueType, field.isMultipleCellValue, field);
     }
 
@@ -304,6 +368,7 @@ export class EvalVisitor
     const value = func.eval(params as TypedValue<any>[], {
       record: this.record,
       dependencies: this.dependencies,
+      timeZone: this.timeZone,
     });
     return new TypedValue(value, type, isMultiple);
   }

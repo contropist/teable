@@ -38,14 +38,16 @@ const generateBase = (): Prisma.BaseCreateInput => {
 
 export const generateCollaborator = async (
   connectUserNum: number
-): Promise<Prisma.CollaboratorCreateInput[]> => {
+): Promise<Prisma.CollaboratorUncheckedCreateInput[]> => {
   const userSets = await generateUser(connectUserNum);
 
   return Array.from({ length: connectUserNum + 1 }, (_, i) => ({
     id: `${collaboratorId}_${i}`,
-    spaceId,
+    resourceId: spaceId,
+    resourceType: 'space',
     roleName: 'owner',
-    userId: userSets[i].id!,
+    principalId: userSets[i].id!,
+    principalType: 'user',
     createdBy: userSets[i].id!,
   }));
 };
@@ -92,15 +94,15 @@ export class SpaceSeeds extends AbstractSeed {
   private async createCollaborator(tx: Prisma.TransactionClient) {
     const collaboratorSets = await generateCollaborator(CREATE_USER_NUM);
     for (const c of collaboratorSets) {
-      const { id, spaceId, userId, ...collaboratorNonUnique } = c;
+      const { id, resourceId, principalId, ...collaboratorNonUnique } = c;
       const collaborator = await tx.collaborator.upsert({
-        where: { id, spaceId, userId },
+        where: { id, resourceId, resourceType: 'space', principalId },
         update: collaboratorNonUnique,
         create: c,
       });
       this.log(
         'UPSERT',
-        `Collaborator ${collaborator.id} - ${collaborator.spaceId} - ${collaborator.userId}`
+        `Collaborator ${collaborator.id} - ${collaborator.resourceId} - ${collaborator.principalId}`
       );
     }
   }

@@ -4,13 +4,7 @@ import type { CSSProperties, ForwardRefRenderFunction } from 'react';
 import { useState, useRef, useMemo, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { useRafState } from 'react-use';
 import type { IGridTheme } from './configs';
-import {
-  gridTheme,
-  GRID_DEFAULT,
-  DEFAULT_SCROLL_STATE,
-  DEFAULT_MOUSE_STATE,
-  GRID_CONTAINER_ID,
-} from './configs';
+import { gridTheme, GRID_DEFAULT, DEFAULT_SCROLL_STATE, DEFAULT_MOUSE_STATE } from './configs';
 import { useResizeObserver } from './hooks';
 import type { ScrollerRef } from './InfiniteScroller';
 import { InfiniteScroller } from './InfiniteScroller';
@@ -29,6 +23,7 @@ import type {
   IGroupPoint,
   ILinearRow,
   IGroupCollection,
+  DragRegionType,
 } from './interface';
 import {
   RegionType,
@@ -54,6 +49,9 @@ export interface IGridExternalProps {
   scrollBarVisible?: boolean;
   rowIndexVisible?: boolean;
   collaborators?: ICollaborator;
+  // [rowIndex, colIndex]
+  searchCursor?: [number, number] | null;
+  searchHitIndex?: { fieldId: string; recordId: string }[];
 
   /**
    * Indicates which areas can be dragged, including rows, columns or no drag
@@ -87,7 +85,9 @@ export interface IGridExternalProps {
   collapsedGroupIds?: Set<string> | null;
   groupPoints?: IGroupPoint[] | null;
 
-  onCopy?: (selection: CombinedSelection) => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  onCopy?: (selection: CombinedSelection, e: React.ClipboardEvent) => void;
   onPaste?: (selection: CombinedSelection, e: React.ClipboardEvent) => void;
   onDelete?: (selection: CombinedSelection) => void;
   onCellEdited?: (cell: ICellItem, newValue: IInnerCell) => void;
@@ -107,6 +107,7 @@ export interface IGridExternalProps {
   onColumnStatisticClick?: (colIndex: number, bounds: IRectangle) => void;
   onContextMenu?: (selection: CombinedSelection, position: IPosition) => void;
   onScrollChanged?: (scrollLeft: number, scrollTop: number) => void;
+  onDragStart?: (type: DragRegionType, dragIndexs: number[]) => void;
 
   /**
    * Triggered when the mouse hovers over the every type of region
@@ -121,6 +122,7 @@ export interface IGridExternalProps {
 
 export interface IGridProps extends IGridExternalProps {
   columns: IGridColumn[];
+  commentCountMap?: Record<string, number>;
   freezeColumnCount?: number;
   rowCount: number;
   rowHeight?: number;
@@ -141,6 +143,8 @@ export interface IGridRef {
   scrollBy: (deltaX: number, deltaY: number) => void;
   scrollTo: (scrollLeft?: number, scrollTop?: number) => void;
   scrollToItem: (position: [columnIndex: number, rowIndex: number]) => void;
+  getCellIndicesAtPosition: (x: number, y: number) => ICellItem | null;
+  getContainer: () => HTMLDivElement | null;
 }
 
 const {
@@ -158,6 +162,7 @@ const {
 const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forwardRef) => {
   const {
     columns,
+    commentCountMap,
     groupCollection,
     collapsedGroupIds,
     draggable = DraggableType.All,
@@ -179,9 +184,13 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
     style,
     customIcons,
     collaborators,
+    searchCursor,
+    searchHitIndex,
     groupPoints,
     columnHeaderVisible = true,
     getCellContent,
+    onUndo,
+    onRedo,
     onCopy,
     onPaste,
     onDelete,
@@ -192,6 +201,7 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
     onColumnAppend,
     onColumnResize,
     onColumnOrdered,
+    onDragStart,
     onContextMenu,
     onSelectionChanged,
     onVisibleRegionChanged,
@@ -222,6 +232,18 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
     scrollTo,
     scrollToItem,
     getScrollState: () => scrollState,
+    getCellIndicesAtPosition: (x: number, y: number): ICellItem | null => {
+      const { scrollLeft, scrollTop } = scrollState;
+
+      const rowIndex = coordInstance.getRowStartIndex(scrollTop + y);
+      const columnIndex = coordInstance.getColumnStartIndex(scrollLeft + x);
+
+      const { type, realIndex } = getLinearRow(rowIndex);
+      if (type !== LinearRowType.Row) return null;
+
+      return [columnIndex, realIndex];
+    },
+    getContainer: () => containerRef.current,
   }));
 
   const hasAppendRow = onRowAppend != null;
@@ -275,13 +297,11 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
     const linearRows: ILinearRow[] = [];
     const rowHeightMap: IIndicesMap = {};
     const real2LinearRowMap: Record<number, number> = {};
-    const collapsedGroupSet: Set<string> = collapsedGroupIds ?? new Set();
 
     groupPoints.forEach((point) => {
       const { type } = point;
       if (type === LinearRowType.Group) {
-        const { id, value, depth } = point;
-        const isCollapsed = collapsedGroupSet.has(id);
+        const { id, value, depth, isCollapsed } = point;
         const isSubGroup = depth > collapsedDepth;
 
         if (isCollapsed) {
@@ -300,16 +320,13 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
           depth,
           value,
           realIndex: rowIndex,
-          isCollapsed,
+          isCollapsed: Boolean(isCollapsed),
         });
         currentValue = value;
         totalIndex++;
       }
       if (type === LinearRowType.Row) {
         const count = point.count;
-        const isCollapsed = collapsedDepth !== Number.MAX_VALUE;
-
-        if (isCollapsed) return;
 
         for (let i = 0; i < count; i++) {
           real2LinearRowMap[rowIndex + i] = totalIndex + i;
@@ -342,7 +359,7 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
       rowCount: totalIndex,
       rowHeightMap,
     };
-  }, [groupPoints, hasAppendRow, collapsedGroupIds]);
+  }, [groupPoints, hasAppendRow]);
 
   const { rowCount, pureRowCount, rowHeightMap, linearRows, real2LinearRowMap } = useMemo(() => {
     return { ...defaultRowsInfo, ...groupRowsInfo };
@@ -524,7 +541,7 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
   return (
     <div className="size-full" style={style} ref={ref}>
       <div
-        id={GRID_CONTAINER_ID}
+        data-t-grid-container
         ref={containerRef}
         tabIndex={0}
         className="relative outline-none"
@@ -536,14 +553,18 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
             height={height}
             theme={theme}
             columns={columns}
+            commentCountMap={commentCountMap}
             mouseState={mouseState}
             scrollState={scrollState}
             rowControls={rowControls}
             collaborators={collaborators}
+            searchCursor={searchCursor}
+            searchHitIndex={searchHitIndex}
             imageManager={imageManager}
             spriteManager={spriteManager}
             coordInstance={coordInstance}
             columnStatistics={columnStatistics}
+            collapsedGroupIds={collapsedGroupIds}
             columnHeaderVisible={columnHeaderVisible}
             forceRenderFlag={forceRenderFlag}
             rowIndexVisible={rowIndexVisible}
@@ -561,6 +582,7 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
             onColumnAppend={onColumnAppend}
             onColumnHeaderClick={onColumnHeaderClick}
             onColumnStatisticClick={onColumnStatisticClick}
+            onCollapsedGroupChanged={onCollapsedGroupChanged}
             onSelectionChanged={onSelectionChanged}
           />
         ) : (
@@ -570,9 +592,12 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
             height={height}
             theme={theme}
             columns={columns}
+            commentCountMap={commentCountMap}
             draggable={draggable}
             selectable={selectable}
             collaborators={collaborators}
+            searchCursor={searchCursor}
+            searchHitIndex={searchHitIndex}
             rowControls={rowControls}
             imageManager={imageManager}
             spriteManager={spriteManager}
@@ -595,9 +620,12 @@ const GridBase: ForwardRefRenderFunction<IGridRef, IGridProps> = (props, forward
             setActiveCell={setActiveCell}
             scrollToItem={scrollToItem}
             scrollBy={scrollBy}
+            onUndo={onUndo}
+            onRedo={onRedo}
             onCopy={onCopy}
             onPaste={onPaste}
             onDelete={onDelete}
+            onDragStart={onDragStart}
             onRowAppend={onRowAppend}
             onRowExpand={onRowExpand}
             onRowOrdered={onRowOrdered}

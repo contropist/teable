@@ -1,11 +1,16 @@
 import { IdPrefix } from '../../../utils';
 import { z } from '../../../zod';
+import { filterSchema } from '../../view/filter';
 import type { FieldType, CellValueType } from '../constant';
 import { Relationship } from '../constant';
 import { FieldCore } from '../field';
 
 export const linkFieldOptionsSchema = z
   .object({
+    baseId: z.string().optional().openapi({
+      description:
+        'the base id of the table that this field is linked to, only required for cross base link',
+    }),
     relationship: z.nativeEnum(Relationship).openapi({
       description: 'describe the relationship from this table to the foreign table',
     }),
@@ -32,15 +37,26 @@ export const linkFieldOptionsSchema = z
     symmetricFieldId: z.string().optional().openapi({
       description: 'the symmetric field in the foreign table, empty if the field is a one-way link',
     }),
+    filterByViewId: z.string().nullable().optional().openapi({
+      description: 'the view id that limits the number of records in the link field',
+    }),
+    visibleFieldIds: z.array(z.string()).nullable().optional().openapi({
+      description: 'the fields that will be displayed in the link field',
+    }),
+    filter: filterSchema.optional(),
   })
   .strip();
 
 export type ILinkFieldOptions = z.infer<typeof linkFieldOptionsSchema>;
 
 export const linkFieldOptionsRoSchema = linkFieldOptionsSchema.pick({
+  baseId: true,
   relationship: true,
   foreignTableId: true,
   isOneWay: true,
+  filterByViewId: true,
+  visibleFieldIds: true,
+  filter: true,
 });
 
 export type ILinkFieldOptionsRo = z.infer<typeof linkFieldOptionsRoSchema>;

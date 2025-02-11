@@ -1,7 +1,7 @@
 {
   "name": "@teable/ui-lib",
-  "version": "1.3.0-beta.0",
-  "license": "AGPL-3.0",
+  "version": "1.6.0",
+  "license": "MIT",
   "homepage": "https://github.com/teableio/teable",
   "publishConfig": {
     "access": "public"
@@ -37,23 +37,27 @@
       "import": "./ui.config.js",
       "require": "./ui.config.js",
       "types": "./ui.config.d.ts"
+    },
+    "global.shadcn.css": {
+      "import": "./dist/global.shadcn.css",
+      "require": "./dist/global.shadcn.css"
     }
   },
   "scripts": {
-    "build": "cross-env NODE_ENV=production tsc --build tsconfig.build.json",
+    "build": "cross-env NODE_ENV=production tsc --build tsconfig.build.json && cp src/shadcn/global.shadcn.css dist/",
     "build-react17jsx": "microbundle --tsconfig ./tsconfig.build.json --jsx jsx --jsxImportSource react --globals react/jsx-runtime=jsx --compress",
     "clean": "rimraf ./dist ./build ./tsconfig.tsbuildinfo ./tsconfig.build.tsbuildinfo ./node_modules/.cache ./.eslintcache",
     "dev": "microbundle watch --tsconfig ./tsconfig.build.json",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --cache --cache-location ../../.cache/eslint/ui-lib.eslintcache",
-    "typecheck": "tsc --project ./tsconfig.build.json --noEmit",
+    "typecheck": "tsc --project ./tsconfig.json --noEmit",
     "test": "run-s test-unit",
     "test-unit": "echo \"No unit tests yet\"",
     "fix-all-files": "eslint . --ext .ts,.tsx,.js,.jsx,.cjs,.mjs --fix",
     "storybook": "start-storybook -p 6006",
     "build-storybook": "build-storybook --output-dir build/storybook",
     "serve-storybook": "sirv build/storybook --cors --port 8888",
-    "shadcn:ui": "node ./scripts/shadcn-ui.js",
-    "update-shadcn-ui": "node ./scripts/update-shadcn-ui"
+    "shadcn:ui": "node --trace-warnings ./scripts/shadcn-ui.mjs",
+    "update-shadcn-ui": "node  ./scripts/update-shadcn-ui.mjs"
   },
   "peerDependencies": {
     "@types/react": "^18.2.11",
@@ -95,8 +99,8 @@
     "postcss": "8.4.38",
     "postcss-flexbugs-fixes": "5.0.2",
     "prettier": "3.2.5",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
     "require-from-string": "2.0.2",
     "rimraf": "5.0.5",
     "shadcn-ui": "0.8.0",
@@ -111,6 +115,7 @@
     "@dnd-kit/core": "6.1.0",
     "@dnd-kit/sortable": "8.0.0",
     "@dnd-kit/utilities": "3.2.2",
+    "@glideapps/glide-data-grid": "6.0.3",
     "@radix-ui/react-accordion": "^1.1.2",
     "@radix-ui/react-alert-dialog": "1.0.5",
     "@radix-ui/react-avatar": "1.0.4",
@@ -128,6 +133,7 @@
     "@radix-ui/react-scroll-area": "1.0.5",
     "@radix-ui/react-select": "2.0.0",
     "@radix-ui/react-separator": "1.0.3",
+    "@radix-ui/react-slider": "1.2.2",
     "@radix-ui/react-slot": "1.0.2",
     "@radix-ui/react-switch": "1.0.3",
     "@radix-ui/react-tabs": "1.0.4",
@@ -136,19 +142,25 @@
     "@radix-ui/react-toggle-group": "1.1.0",
     "@radix-ui/react-tooltip": "1.0.7",
     "@teable/icons": "workspace:^",
+    "@teable/next-themes": "0.3.5",
     "class-variance-authority": "0.7.0",
     "clsx": "2.1.0",
     "cmdk": "1.0.0",
     "date-fns": "2.30.0",
     "deepmerge": "4.3.1",
+    "docx-preview": "0.3.2",
     "embla-carousel-react": "8.0.0",
-    "next-themes": "0.3.0",
+    "input-otp": "1.4.1",
+    "marked": "14.1.3",
     "react-day-picker": "8.10.0",
     "react-hook-form": "7.51.1",
     "react-resizable-panels": "2.0.16",
+    "react-responsive-carousel": "3.2.23",
+    "recharts": "2.12.3",
     "sonner": "1.4.41",
     "tailwind-merge": "2.2.2",
     "tailwindcss-animate": "1.0.7",
+    "xlsx": "0.18.5",
     "zod": "3.22.4"
   }
 }

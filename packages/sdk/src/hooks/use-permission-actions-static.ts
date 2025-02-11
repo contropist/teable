@@ -1,12 +1,12 @@
 /* eslint-disable @typescript-eslint/naming-convention */
-import type { AllActions } from '@teable/core';
+import type { Action } from '@teable/core';
 import { ActionPrefix } from '@teable/core';
 import { useMemo } from 'react';
 import { useTranslation } from '../context/app/i18n';
 import type { TKey } from '../context/app/i18n';
 
 const actionsI18nMap: Record<
-  AllActions,
+  Action,
   {
     description: TKey;
   }
@@ -40,6 +40,9 @@ const actionsI18nMap: Record<
   },
   'base|read': {
     description: 'permission.actionDescription.baseRead',
+  },
+  'base|read_all': {
+    description: 'permission.actionDescription.baseReadAll',
   },
   'base|update': {
     description: 'permission.actionDescription.baseUpdate',
@@ -80,6 +83,18 @@ const actionsI18nMap: Record<
   'table|export': {
     description: 'permission.actionDescription.tableExport',
   },
+  'table|trash_read': {
+    description: 'permission.actionDescription.tableTrashRead',
+  },
+  'table|trash_update': {
+    description: 'permission.actionDescription.tableTrashUpdate',
+  },
+  'table|trash_reset': {
+    description: 'permission.actionDescription.tableTrashReset',
+  },
+  'table_record_history|read': {
+    description: 'permission.actionDescription.recordHistoryRead',
+  },
   'view|create': {
     description: 'permission.actionDescription.viewCreate',
   },
@@ -91,6 +106,9 @@ const actionsI18nMap: Record<
   },
   'view|update': {
     description: 'permission.actionDescription.viewUpdate',
+  },
+  'view|share': {
+    description: 'permission.actionDescription.viewShare',
   },
   'field|create': {
     description: 'permission.actionDescription.fieldCreate',
@@ -134,6 +152,21 @@ const actionsI18nMap: Record<
   'user|email_read': {
     description: 'permission.actionDescription.userEmailRead',
   },
+  'base|query_data': {
+    description: 'permission.actionDescription.baseQuery',
+  },
+  'instance|read': {
+    description: 'permission.actionDescription.instanceRead',
+  },
+  'instance|update': {
+    description: 'permission.actionDescription.instanceUpdate',
+  },
+  'enterprise|read': {
+    description: 'permission.actionDescription.enterpriseRead',
+  },
+  'enterprise|update': {
+    description: 'permission.actionDescription.enterpriseUpdate',
+  },
 };
 
 const actionPrefixI18nMap: Record<ActionPrefix, { title: TKey }> = {
@@ -161,6 +194,15 @@ const actionPrefixI18nMap: Record<ActionPrefix, { title: TKey }> = {
   [ActionPrefix.User]: {
     title: 'noun.user',
   },
+  [ActionPrefix.TableRecordHistory]: {
+    title: 'noun.recordHistory',
+  },
+  [ActionPrefix.Instance]: {
+    title: 'noun.instance',
+  },
+  [ActionPrefix.Enterprise]: {
+    title: 'noun.enterprise',
+  },
 };
 
 export const usePermissionActionsStatic = () => {
@@ -168,13 +210,13 @@ export const usePermissionActionsStatic = () => {
   return useMemo(() => {
     const actionStaticMap = Object.keys(actionsI18nMap).reduce(
       (acc, key) => {
-        const action = key as AllActions;
+        const action = key as Action;
         acc[action] = {
           description: t(actionsI18nMap[action].description),
         };
         return acc;
       },
-      {} as Record<AllActions, { description: string }>
+      {} as Record<Action, { description: string }>
     );
     const actionPrefixStaticMap = Object.values(ActionPrefix).reduce(
       (acc, prefix) => {

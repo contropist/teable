@@ -1,137 +1,229 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { SpaceRole } from '@teable/core';
-import { hasPermission } from '@teable/core';
-import { X } from '@teable/icons';
-import type { ListSpaceCollaboratorVo } from '@teable/openapi';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { IRole } from '@teable/core';
+import { canManageRole, Role } from '@teable/core';
+import { Settings } from '@teable/icons';
+import type { ListSpaceCollaboratorRo, UpdateBaseCollaborateRo } from '@teable/openapi';
 import {
+  PrincipalType,
+  deleteBaseCollaborator,
   deleteSpaceCollaborator,
   getSpaceCollaboratorList,
+  updateBaseCollaborator,
   updateSpaceCollaborator,
 } from '@teable/openapi';
-import { ReactQueryKeys, useSession, useLanDayjs } from '@teable/sdk';
-import {
-  Button,
-  Input,
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@teable/ui-lib';
-import { debounce } from 'lodash';
+import { ReactQueryKeys, useSession } from '@teable/sdk';
+import { Badge, Button } from '@teable/ui-lib/shadcn';
+import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
 import type { FC, PropsWithChildren } from 'react';
-import React, { useMemo, useState } from 'react';
-import { Collaborator } from './Collaborator';
-import { RoleSelect } from './RoleSelect';
+import React, { useMemo } from 'react';
+import { useFilteredRoleStatic as useFilteredBaseRoleStatic } from '../base/useFilteredRoleStatic';
+import { CollaboratorItem } from '../components/CollaboratorItem';
+import { CollaboratorList } from '../components/CollaboratorList';
+import { RoleSelect } from '../components/RoleSelect';
+import { useFilteredRoleStatic } from './useFilteredRoleStatic';
 
 interface ICollaborators {
   spaceId: string;
-  role: SpaceRole;
+  role: IRole;
+  collaboratorQuery?: ListSpaceCollaboratorRo;
 }
 
-const filterCollaborators = (search: string, collaborators?: ListSpaceCollaboratorVo) => {
-  if (!search) return collaborators;
-  return collaborators?.filter(({ userName, email }) => {
-    const searchLower = search.toLowerCase();
-    const usernameLower = userName.toLowerCase();
-    const emailLower = email.toLowerCase();
-    return !search || usernameLower.includes(searchLower) || emailLower.includes(searchLower);
-  });
-};
+const MEMBERS_PER_PAGE = 50;
 
 export const Collaborators: FC<PropsWithChildren<ICollaborators>> = (props) => {
-  const { spaceId, role, children } = props;
-  const [search, setSearch] = useState<string>('');
-  const [applySearch, setApplySearch] = useState<string>(search);
+  const { spaceId, role: currentRole, children, collaboratorQuery } = props;
+  const [search, setSearch] = React.useState('');
   const queryClient = useQueryClient();
-  const { user } = useSession();
   const { t } = useTranslation('common');
-  const dayjs = useLanDayjs();
+  const { user } = useSession();
+  const router = useRouter();
 
-  const { data: collaborators } = useQuery({
-    queryKey: ReactQueryKeys.spaceCollaboratorList(spaceId),
-    queryFn: ({ queryKey }) => getSpaceCollaboratorList(queryKey[1]).then((res) => res.data),
+  const { data, hasNextPage, fetchNextPage, isLoading } = useInfiniteQuery({
+    queryKey: collaboratorQuery
+      ? ReactQueryKeys.spaceCollaboratorList(spaceId, {
+          ...collaboratorQuery,
+          search,
+        })
+      : ReactQueryKeys.spaceCollaboratorList(spaceId, {
+          search,
+        }),
+    queryFn: ({ queryKey, pageParam = 0 }) =>
+      getSpaceCollaboratorList(queryKey[1], {
+        ...queryKey[2],
+        skip: pageParam * MEMBERS_PER_PAGE,
+        take: MEMBERS_PER_PAGE,
+      }).then((res) => res.data),
+    staleTime: 1000,
+    getNextPageParam: (lastPage, pages) => {
+      const allCollaborators = pages.flatMap((page) => page.collaborators);
+      return allCollaborators.length >= lastPage.total ? undefined : pages.length;
+    },
   });
 
+  const collaborators = useMemo(() => {
+    return data?.pages.flatMap((page) => page.collaborators);
+  }, [data]);
+
   const { mutate: updateCollaborator, isLoading: updateCollaboratorLoading } = useMutation({
-    mutationFn: updateSpaceCollaborator,
-    onSuccess: async () => {
+    mutationFn: ({
+      resourceId,
+      updateCollaborateRo,
+      isBase,
+    }: {
+      resourceId: string;
+      updateCollaborateRo: {
+        principalId: string;
+        principalType: PrincipalType;
+        role: IRole;
+      };
+      isBase?: boolean;
+    }) =>
+      isBase
+        ? updateBaseCollaborator({
+            baseId: resourceId,
+            updateBaseCollaborateRo: updateCollaborateRo as UpdateBaseCollaborateRo,
+          })
+        : updateSpaceCollaborator({
+            spaceId: resourceId,
+            updateSpaceCollaborateRo: updateCollaborateRo,
+          }),
+    onSuccess: async (_, context) => {
+      const { isBase, resourceId } = context;
+
       await queryClient.invalidateQueries(ReactQueryKeys.spaceCollaboratorList(spaceId));
+      if (isBase) {
+        queryClient.invalidateQueries(ReactQueryKeys.baseCollaboratorList(resourceId));
+      } else {
+        queryClient.invalidateQueries(ReactQueryKeys.space(spaceId));
+        queryClient.invalidateQueries(ReactQueryKeys.spaceList());
+      }
     },
   });
 
   const { mutate: deleteCollaborator, isLoading: deleteCollaboratorLoading } = useMutation({
-    mutationFn: deleteSpaceCollaborator,
-    onSuccess: async () => {
+    mutationFn: ({
+      principalId,
+      resourceId,
+      isBase,
+    }: {
+      principalId: string;
+      resourceId: string;
+      isBase?: boolean;
+    }) =>
+      isBase
+        ? deleteBaseCollaborator({
+            baseId: resourceId,
+            deleteBaseCollaboratorRo: { principalId, principalType: PrincipalType.User },
+          })
+        : deleteSpaceCollaborator({
+            spaceId: resourceId,
+            deleteSpaceCollaboratorRo: { principalId, principalType: PrincipalType.User },
+          }),
+    onSuccess: async (_, context) => {
+      if (context.principalId === user.id) {
+        router.push('/space');
+        queryClient.invalidateQueries(ReactQueryKeys.spaceList());
+        return;
+      }
       await queryClient.invalidateQueries(ReactQueryKeys.spaceCollaboratorList(spaceId));
     },
   });
 
-  const collaboratorsFiltered = useMemo(() => {
-    return filterCollaborators(applySearch, collaborators);
-  }, [applySearch, collaborators]);
+  const filteredRoleStatic = useFilteredRoleStatic(currentRole);
+  const filteredBaseRoleStatic = useFilteredBaseRoleStatic(currentRole);
 
-  const hasGrantRolePermission = hasPermission(role, 'space|grant_role');
-
-  const setApplySearchDebounced = useMemo(() => {
-    return debounce(setApplySearch, 200);
-  }, []);
+  const goBase = (baseId: string) => {
+    router.push(`/base/${baseId}`);
+  };
 
   return (
-    <div>
-      <div className="mb-6 flex items-center gap-x-4">
-        <Input
-          className="h-8"
-          type="search"
-          placeholder={t('invite.dialog.collaboratorSearchPlaceholder')}
-          value={search}
-          onChange={(e) => {
-            const value = e.target.value;
-            setSearch(value);
-            setApplySearchDebounced(value);
-          }}
-        />
-        {children}
-      </div>
-      <div className="space-y-5">
-        {collaboratorsFiltered?.map(({ userId, userName, email, role, avatar, createdTime }) => (
-          <div key={userId} className="relative flex items-center gap-3 pr-6">
-            <Collaborator name={userName} email={email} avatar={avatar} />
-            <div className="text-xs text-muted-foreground">
-              {t('invite.dialog.collaboratorJoin', {
-                joinTime: dayjs(createdTime).fromNow(),
-              })}
-            </div>
+    <CollaboratorList
+      inputRight={children}
+      onSearch={setSearch}
+      searchPlaceholder={t('invite.dialog.collaboratorSearchPlaceholder')}
+      isSearching={isLoading}
+    >
+      {collaborators?.map((item) => {
+        const { role, createdTime, base } = item;
+        const isBase = Boolean(base);
+        const collaborator =
+          item.type === PrincipalType.User
+            ? {
+                type: PrincipalType.User as const,
+                name: item.userName,
+                email: item.email,
+                avatar: item.avatar,
+                id: item.userId,
+              }
+            : {
+                type: PrincipalType.Department as const,
+                name: item.departmentName,
+                id: item.departmentId,
+              };
+        const canOperator =
+          canManageRole(currentRole, role) ||
+          collaborator.id === user.id ||
+          currentRole === Role.Owner;
+        return (
+          <CollaboratorItem
+            key={collaborator.id}
+            item={collaborator}
+            createdTime={createdTime}
+            onDeleted={() => {
+              deleteCollaborator({
+                resourceId: base ? base.id : spaceId,
+                principalId: collaborator.id,
+                isBase,
+              });
+            }}
+            showDelete={canOperator}
+            deletable={!deleteCollaboratorLoading && canOperator}
+            collaboratorTips={
+              isBase && (
+                <div className="ml-3 inline-flex items-center gap-2">
+                  <Badge className="text-muted-foreground" variant={'outline'}>
+                    {base?.name}
+                  </Badge>
+                  <Button
+                    className="h-auto p-0.5"
+                    size={'xs'}
+                    variant={'ghost'}
+                    onClick={() => goBase(base!.id)}
+                  >
+                    <Settings />
+                  </Button>
+                </div>
+              )
+            }
+          >
             <RoleSelect
+              className="mx-1"
               value={role}
-              disabled={updateCollaboratorLoading || userId === user.id || !hasGrantRolePermission}
+              options={isBase ? filteredBaseRoleStatic : filteredRoleStatic}
+              disabled={updateCollaboratorLoading || !canOperator}
               onChange={(role) =>
-                updateCollaborator({ spaceId, updateSpaceCollaborateRo: { userId, role } })
+                updateCollaborator({
+                  resourceId: base ? base.id : spaceId,
+                  updateCollaborateRo: {
+                    principalId: collaborator.id,
+                    principalType: collaborator.type,
+                    role,
+                  },
+                  isBase,
+                })
               }
             />
-            {userId !== user.id && hasGrantRolePermission && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      className="absolute right-0 h-auto p-0 hover:bg-inherit"
-                      size="sm"
-                      variant="ghost"
-                      disabled={deleteCollaboratorLoading}
-                      onClick={() => deleteCollaborator({ spaceId, userId })}
-                    >
-                      <X className="size-4 cursor-pointer text-muted-foreground opacity-70 hover:opacity-100" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>{t('invite.dialog.collaboratorRemove')}</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
+          </CollaboratorItem>
+        );
+      })}
+      {hasNextPage && (
+        <div className="flex justify-center py-4">
+          <Button variant="link" size="sm" className="text-[13px]" onClick={() => fetchNextPage()}>
+            {t('actions.loadMore')}
+          </Button>
+        </div>
+      )}
+    </CollaboratorList>
   );
 };

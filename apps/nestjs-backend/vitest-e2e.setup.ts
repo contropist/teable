@@ -3,6 +3,7 @@ import path from 'path';
 import type { INestApplication } from '@nestjs/common';
 import { DriverClient, getRandomString, parseDsn } from '@teable/core';
 import dotenv from 'dotenv-flow';
+import { buildSync } from 'esbuild';
 
 interface ITestConfig {
   driver: string;
@@ -43,7 +44,7 @@ function prepareSqliteEnv() {
   if (!process.env.PRISMA_DATABASE_URL?.startsWith('file:')) {
     return;
   }
-  const prevFilePath = process.env.PRISMA_DATABASE_URL.substring(5);
+  const prevFilePath = '../../db/main.db';
   const prevDir = path.dirname(prevFilePath);
   const baseName = path.basename(prevFilePath);
 
@@ -61,8 +62,20 @@ function prepareSqliteEnv() {
   fs.copyFileSync(path.join(dbPath, baseName), path.join(testDbPath, newFileName));
 }
 
+function compileWorkerFile() {
+  const entryFile = path.join(__dirname, 'src/worker/**.ts');
+  const outFile = path.join(__dirname, 'dist/worker');
+
+  buildSync({
+    entryPoints: [entryFile],
+    outdir: outFile,
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+  });
+}
+
 async function setup() {
-  console.log('node-env', process.env.NODE_ENV);
   dotenv.config({ path: '../nextjs-app' });
 
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
@@ -74,6 +87,8 @@ async function setup() {
   globalThis.testConfig.driver = driver;
 
   prepareSqliteEnv();
+
+  compileWorkerFile();
 }
 
 export default setup();

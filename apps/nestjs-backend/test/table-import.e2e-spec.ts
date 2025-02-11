@@ -1,5 +1,4 @@
 import fs from 'fs';
-import os from 'node:os';
 import path from 'path';
 import type { INestApplication } from '@nestjs/common';
 import { FieldType, defaultDatetimeFormatting } from '@teable/core';
@@ -18,10 +17,14 @@ import {
   SUPPORTEDTYPE,
   UploadType,
 } from '@teable/openapi';
+import dayjs, { extend } from 'dayjs';
+import timezone from 'dayjs/plugin/timezone';
 import * as XLSX from 'xlsx';
+import StorageAdapter from '../src/features/attachments/plugins/adapter';
 import { CsvImporter } from '../src/features/import/open-api/import.class';
+import { initApp, permanentDeleteTable, getTable as apiGetTableById } from './utils/init-app';
 
-import { initApp, deleteTable, getTable as apiGetTableById } from './utils/init-app';
+extend(timezone);
 
 enum TestFileFormat {
   'CSV' = 'csv',
@@ -97,10 +100,9 @@ const genTestFiles = async () => {
     [TestFileFormat.TXT]: 'text/plain',
     [TestFileFormat.XLSX]: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   };
-  const tmpDir = os.tmpdir();
   for (let i = 0; i < testFileFormats.length; i++) {
     const format = testFileFormats[i];
-    const tmpPath = path.resolve(path.join(tmpDir, `test.${format}`));
+    const tmpPath = path.resolve(path.join(StorageAdapter.TEMPORARY_DIR, `test.${format}`));
     const data = fileDataMap[format];
     const contentType = contentTypeMap[format];
 
@@ -124,7 +126,7 @@ const genTestFiles = async () => {
 
     const {
       data: { presignedUrl },
-    } = await apiNotify(token);
+    } = await apiNotify(token, undefined, 'Import Table.csv');
 
     result[format] = {
       path: tmpPath,
@@ -179,7 +181,7 @@ describe('OpenAPI ImportController (e2e)', () => {
     });
     for (let i = 0; i < bases.length; i++) {
       const [baseId, id] = bases[i];
-      await deleteTable(baseId, id);
+      await permanentDeleteTable(baseId, id);
       await apiDeleteBase(baseId);
     }
     await app.close();
@@ -222,6 +224,8 @@ describe('OpenAPI ImportController (e2e)', () => {
   });
 
   describe('/import/{baseId} OpenAPI ImportController (e2e) (Post)', () => {
+    const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
     it.each(testFileFormats.filter((format) => format !== TestFileFormat.TXT))(
       'should create a new Table from %s file',
       async (format) => {
@@ -266,10 +270,15 @@ describe('OpenAPI ImportController (e2e)', () => {
           name: field.name,
         }));
 
-        await apiGetTableById(baseId, table.data[0].id);
+        await delay(1000);
+
+        const { records } = await apiGetTableById(baseId, table.data[0].id, {
+          includeContent: true,
+        });
 
         bases.push([baseId, id]);
 
+        expect(records?.length).toBe(2);
         expect(createdFields).toEqual(assertHeaders);
       }
     );
@@ -353,7 +362,7 @@ describe('OpenAPI ImportController (e2e)', () => {
       const tableRecords = records?.map((r) => {
         const newFields = { ...r.fields };
         if (newFields['field_4']) {
-          newFields['field_4'] = +new Date(newFields['field_4'] as string);
+          newFields['field_4'] = new Date(newFields['field_4'] as string).getTime();
         }
         return newFields;
       });
@@ -363,13 +372,19 @@ describe('OpenAPI ImportController (e2e)', () => {
           field_1: 1,
           field_2: 'string_1',
           field_3: true,
-          field_4: +new Date(new Date('2022-11-10 16:00:00').toUTCString()),
+          field_4: dayjs
+            .tz('2022-11-10 16:00:00', defaultDatetimeFormatting.timeZone)
+            .toDate()
+            .getTime(),
           field_6: 'long\ntext',
         },
         {
           field_1: 2,
           field_2: 'string_2',
-          field_4: +new Date(new Date('2022-11-11 16:00:00').toUTCString()),
+          field_4: dayjs
+            .tz('2022-11-11 16:00:00', defaultDatetimeFormatting.timeZone)
+            .toDate()
+            .getTime(),
         },
       ];
 
