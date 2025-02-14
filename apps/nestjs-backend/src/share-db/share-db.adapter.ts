@@ -70,7 +70,7 @@ export class ShareDbAdapter extends ShareDb.DB {
         return callback(error, []);
       }
       if (!results.length) {
-        return callback(undefined, []);
+        return callback(undefined, [], extra);
       }
 
       this.getSnapshotBulk(
@@ -101,6 +101,9 @@ export class ShareDbAdapter extends ShareDb.DB {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     callback: (error: any | null, ids: string[], extra?: any) => void
   ) {
+    if (!options.cookie) {
+      this.logger.error(`No cookie found in options: ${JSON.stringify(options)}`);
+    }
     try {
       await this.cls.runWith(
         {
@@ -205,6 +208,9 @@ export class ShareDbAdapter extends ShareDb.DB {
     options: any,
     callback: (err: unknown, data?: Snapshot) => void
   ) {
+    if (!options.agentCustom.cookie) {
+      this.logger.error(`No cookie found in options agentCustom: ${JSON.stringify(options)}`);
+    }
     await this.cls.runWith(
       {
         ...this.cls.get(),
@@ -212,7 +218,7 @@ export class ShareDbAdapter extends ShareDb.DB {
         shareViewId: options.agentCustom.shareId,
       },
       async () => {
-        this.getSnapshotBulk(collection, [id], projection, options, (err, data) => {
+        return this.getSnapshotBulk(collection, [id], projection, options, (err, data) => {
           if (err) {
             callback(err);
           } else {
@@ -237,28 +243,29 @@ export class ShareDbAdapter extends ShareDb.DB {
     collection: string,
     id: string,
     from: number,
-    to: number,
+    to: number | null,
     options: unknown,
     callback: (error: unknown, data?: unknown) => void
   ) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const [_, collectionId] = collection.split('_');
-      const nativeSql = this.knex('ops')
+      const query = this.knex('ops')
         .select('operation')
         .where({
           collection: collectionId,
           doc_id: id,
         })
         .andWhere('version', '>=', from)
-        .andWhere('version', '<', to)
-        .toSQL()
-        .toNative();
+        .limit(1000);
 
-      const res = await this.prismaService
-        .txClient()
-        .$queryRawUnsafe<{ operation: string }[]>(nativeSql.sql, ...nativeSql.bindings);
+      if (to) {
+        query.andWhere('version', '<', to);
+      }
 
+      const sql = query.toQuery();
+
+      const res = await this.prismaService.txClient().$queryRawUnsafe<{ operation: string }[]>(sql);
       callback(
         null,
         res.map(function (row) {

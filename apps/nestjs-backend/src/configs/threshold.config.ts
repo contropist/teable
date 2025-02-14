@@ -1,3 +1,4 @@
+/* eslint-disable sonarjs/cognitive-complexity */
 /* eslint-disable @typescript-eslint/naming-convention */
 import { Inject } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
@@ -14,10 +15,16 @@ export const thresholdConfig = registerAs('threshold', () => ({
   calcChunkSize: Number(process.env.CALC_CHUNK_SIZE ?? 1_000),
   maxFreeRowLimit: Number(process.env.MAX_FREE_ROW_LIMIT ?? 0),
   estimateCalcCelPerMs: Number(process.env.ESTIMATE_CALC_CEL_PER_MS ?? 3),
+  maxUndoStackSize: Number(process.env.MAX_UNDO_STACK_SIZE ?? 200),
+  undoExpirationTime: Number(process.env.UNDO_EXPIRATION_TIME ?? 86400),
   bigTransactionTimeout: Number(
     process.env.BIG_TRANSACTION_TIMEOUT ?? 10 * 60 * 1000 /* 10 mins */
   ),
   automationGap: Number(process.env.AUTOMATION_GAP ?? 200),
+  maxAttachmentUploadSize: Number(process.env.MAX_ATTACHMENT_UPLOAD_SIZE ?? Infinity),
+  maxOpenapiAttachmentUploadSize: Number(
+    process.env.MAX_OPENAPI_ATTACHMENT_UPLOAD_SIZE ?? Infinity
+  ),
 }));
 
 export const ThresholdConfig = () => Inject(thresholdConfig.KEY);

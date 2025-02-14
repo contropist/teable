@@ -15,6 +15,11 @@ import type {
   IUserMeVo,
   IRecordsVo,
   ITableVo,
+  IGetSharedBaseVo,
+  IGroupPointsRo,
+  IGroupPointsVo,
+  ListSpaceCollaboratorRo,
+  IPublicSettingVo,
 } from '@teable/openapi';
 import {
   ACCEPT_INVITATION_LINK,
@@ -22,9 +27,12 @@ import {
   GET_BASE_ALL,
   GET_DEFAULT_VIEW_ID,
   GET_FIELD_LIST,
+  GET_GROUP_POINTS,
+  GET_PUBLIC_SETTING,
   GET_RECORDS_URL,
   GET_RECORD_URL,
   GET_SETTING,
+  GET_SHARED_BASE,
   GET_SPACE,
   GET_SPACE_LIST,
   GET_TABLE,
@@ -47,16 +55,11 @@ export class SsrApi {
     this.axios = getAxios();
   }
 
-  async getTable(baseId: string, tableId: string, viewId?: string): Promise<ITableFullVo> {
-    const { records } = await this.axios
-      .get<IRecordsVo>(urlBuilder(GET_RECORDS_URL, { baseId, tableId }), {
-        params: {
-          viewId,
-          fieldKeyType: FieldKeyType.Id,
-        },
-      })
-      .then(({ data }) => data);
-
+  async getTable(
+    baseId: string,
+    tableId: string,
+    viewId?: string
+  ): Promise<ITableFullVo & { extra: IRecordsVo['extra'] }> {
     const fields = await this.getFields(tableId, { viewId });
     const views = await this.axios
       .get<IViewVo[]>(urlBuilder(GET_VIEW_LIST, { tableId }))
@@ -70,11 +73,24 @@ export class SsrApi {
         },
       })
       .then(({ data }) => data);
+
+    const currentView = views.find((view) => view.id === viewId);
+    const { records, extra } = await this.axios
+      .get<IRecordsVo>(urlBuilder(GET_RECORDS_URL, { baseId, tableId }), {
+        params: {
+          viewId,
+          fieldKeyType: FieldKeyType.Id,
+          groupBy: currentView?.group ? JSON.stringify(currentView.group) : undefined,
+        },
+      })
+      .then(({ data }) => data);
+
     return {
       ...table,
       records,
       views,
       fields,
+      extra,
     };
   }
 
@@ -124,9 +140,11 @@ export class SsrApi {
     return await this.axios.get<IGetBaseVo[]>(GET_BASE_ALL).then(({ data }) => data);
   }
 
-  async getSpaceCollaboratorList(spaceId: string) {
+  async getSpaceCollaboratorList(spaceId: string, query?: ListSpaceCollaboratorRo) {
     return await this.axios
-      .get<ListSpaceCollaboratorVo>(urlBuilder(SPACE_COLLABORATE_LIST, { spaceId }))
+      .get<ListSpaceCollaboratorVo>(urlBuilder(SPACE_COLLABORATE_LIST, { spaceId }), {
+        params: query,
+      })
       .then(({ data }) => data);
   }
 
@@ -152,7 +170,27 @@ export class SsrApi {
     return this.axios.get<ISettingVo>(GET_SETTING).then(({ data }) => data);
   }
 
+  async getPublicSetting() {
+    return this.axios.get<IPublicSettingVo>(GET_PUBLIC_SETTING).then(({ data }) => data);
+  }
+
   async getUserMe() {
     return this.axios.get<IUserMeVo>(USER_ME).then(({ data }) => data);
+  }
+
+  async getSharedBase() {
+    return this.axios.get<IGetSharedBaseVo[]>(GET_SHARED_BASE).then(({ data }) => data);
+  }
+
+  async getGroupPoints(tableId: string, query: IGroupPointsRo) {
+    return this.axios
+      .get<IGroupPointsVo>(urlBuilder(GET_GROUP_POINTS, { tableId }), {
+        params: {
+          ...query,
+          filter: JSON.stringify(query?.filter),
+          groupBy: JSON.stringify(query?.groupBy),
+        },
+      })
+      .then(({ data }) => data);
   }
 }

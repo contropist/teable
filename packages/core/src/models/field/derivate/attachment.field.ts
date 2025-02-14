@@ -17,6 +17,8 @@ export const attachmentItemSchema = z.object({
   presignedUrl: z.string().optional(),
   width: z.number().optional(),
   height: z.number().optional(),
+  smThumbnailUrl: z.string().optional(),
+  lgThumbnailUrl: z.string().optional(),
 });
 
 export type IAttachmentItem = z.infer<typeof attachmentItemSchema>;

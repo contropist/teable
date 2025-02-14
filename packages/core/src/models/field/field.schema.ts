@@ -26,6 +26,8 @@ import {
   lastModifiedTimeFieldOptionsRoSchema,
   autoNumberFieldOptionsRoSchema,
   userFieldOptionsSchema,
+  createdByFieldOptionsSchema,
+  lastModifiedByFieldOptionsSchema,
 } from './derivate';
 import { unionFormattingSchema } from './formatting';
 import { unionShowAsSchema } from './show-as';
@@ -38,6 +40,7 @@ export const lookupOptionsVoSchema = linkFieldOptionsSchema
     fkHostTableName: true,
     selfKeyName: true,
     foreignKeyName: true,
+    filter: true,
   })
   .merge(
     z.object({
@@ -53,6 +56,7 @@ export const lookupOptionsRoSchema = lookupOptionsVoSchema.pick({
   foreignTableId: true,
   lookupFieldId: true,
   linkFieldId: true,
+  filter: true,
 });
 
 export type ILookupOptionsRo = z.infer<typeof lookupOptionsRoSchema>;
@@ -67,6 +71,8 @@ export const unionFieldOptions = z.union([
   singlelineTextFieldOptionsSchema.strict(),
   ratingFieldOptionsSchema.strict(),
   userFieldOptionsSchema.strict(),
+  createdByFieldOptionsSchema.strict(),
+  lastModifiedByFieldOptionsSchema.strict(),
 ]);
 
 export const unionFieldOptionsVoSchema = z.union([
@@ -172,12 +178,12 @@ export const fieldVoSchema = z.object({
   dbFieldName: z
     .string()
     .min(1, { message: 'name cannot be empty' })
-    .regex(/^[a-z]\w{0,62}$/i, {
+    .regex(/^\w{0,63}$/, {
       message: 'Invalid name format',
     })
     .openapi({
       description:
-        'Field(column) name in backend database. Limitation: 1-63 characters, start with letter, can only contain letters, numbers and underscore, case sensitive, cannot be duplicated with existing db field name in the table.',
+        'Field(column) name in backend database. Limitation: 1-63 characters, can only contain letters, numbers and underscore, case sensitive, cannot be duplicated with existing db field name in the table.',
     }),
 });
 
@@ -258,10 +264,12 @@ export const getOptionsSchema = (type: FieldType) => {
       return lastModifiedTimeFieldOptionsRoSchema;
     case FieldType.AutoNumber:
       return autoNumberFieldOptionsRoSchema;
+    case FieldType.CreatedBy:
+      return createdByFieldOptionsSchema;
+    case FieldType.LastModifiedBy:
+      return lastModifiedByFieldOptionsSchema;
     case FieldType.Duration:
     case FieldType.Count:
-    case FieldType.CreatedBy:
-    case FieldType.LastModifiedBy:
     case FieldType.Button:
       throw new Error('no implementation');
     default:
@@ -359,6 +367,14 @@ export const createFieldRoSchema = baseFieldRoSchema
           'The id of the field that start with "fld", followed by exactly 16 alphanumeric characters `/^fld[\\da-zA-Z]{16}$/`. It is sometimes useful to specify an id at creation time',
         example: 'fldxxxxxxxxxxxxxxxx',
       }),
+      order: z
+        .object({
+          viewId: z.string().openapi({
+            description: 'You can only specify order in one view when create field',
+          }),
+          orderIndex: z.number(),
+        })
+        .optional(),
     })
   )
   .superRefine(refineOptions);
@@ -380,8 +396,10 @@ export const getFieldsQuerySchema = z.object({
     description: 'The id of the view.',
   }),
   filterHidden: z.coerce.boolean().optional(),
-  filterDenied: z.coerce.boolean().optional(),
-  excludeFieldIds: z.array(z.string().startsWith(IdPrefix.Field)).optional(),
+  projection: z.array(z.string().startsWith(IdPrefix.Field)).optional().openapi({
+    description:
+      'If you want to get only some fields, pass in this parameter, otherwise all visible fields will be obtained',
+  }),
 });
 
 export type IGetFieldsQuery = z.infer<typeof getFieldsQuerySchema>;

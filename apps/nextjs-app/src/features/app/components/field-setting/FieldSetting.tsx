@@ -5,7 +5,7 @@ import { Share2 } from '@teable/icons';
 import { planFieldCreate, type IPlanFieldConvertVo, planFieldConvert } from '@teable/openapi';
 import { ReactQueryKeys } from '@teable/sdk/config';
 import { useTable, useView } from '@teable/sdk/hooks';
-import { ConfirmDialog } from '@teable/ui-lib/base';
+import { ConfirmDialog, Spin } from '@teable/ui-lib/base';
 import {
   Dialog,
   DialogClose,
@@ -23,6 +23,7 @@ import { tableConfig } from '@/features/i18n/table.config';
 import { DynamicFieldGraph } from '../../blocks/graph/DynamicFieldGraph';
 import { ProgressBar } from '../../blocks/graph/ProgressBar';
 import { DynamicFieldEditor } from './DynamicFieldEditor';
+import { useDefaultFieldName } from './hooks/useDefaultFieldName';
 import type { IFieldEditorRo, IFieldSetting, IFieldSettingBase } from './type';
 import { FieldOperator } from './type';
 
@@ -31,6 +32,7 @@ export const FieldSetting = (props: IFieldSetting) => {
 
   const table = useTable();
   const view = useView();
+  const getDefaultFieldName = useDefaultFieldName();
 
   const [graphVisible, setGraphVisible] = useState<boolean>(false);
   const [processVisible, setProcessVisible] = useState<boolean>(false);
@@ -43,6 +45,11 @@ export const FieldSetting = (props: IFieldSetting) => {
     props.onCancel?.();
   };
 
+  const createNewField = async (field: IFieldRo) => {
+    const fieldName = field.name ?? (await getDefaultFieldName(field));
+    return await table?.createField({ ...field, name: fieldName });
+  };
+
   const performAction = async (field: IFieldRo) => {
     setGraphVisible(false);
     if (plan && (plan.estimateTime || 0) > 1000) {
@@ -50,15 +57,20 @@ export const FieldSetting = (props: IFieldSetting) => {
     }
     try {
       if (operator === FieldOperator.Add) {
-        await table?.createField(field);
+        await createNewField(field);
       }
 
       if (operator === FieldOperator.Insert) {
-        const result = await table?.createField(field);
-        const fieldId = result?.data?.id;
-        if (view && order != null && fieldId && table?.id) {
-          await view.updateColumnMeta([{ fieldId, columnMeta: { order } }]);
-        }
+        await createNewField({
+          ...field,
+          order:
+            view && order != null
+              ? {
+                  viewId: view.id,
+                  orderIndex: order,
+                }
+              : undefined,
+        });
       }
 
       if (operator === FieldOperator.Edit) {
@@ -86,7 +98,8 @@ export const FieldSetting = (props: IFieldSetting) => {
           props.field?.id as string,
           fieldRo
         ),
-        queryFn: ({ queryKey }) => planFieldConvert(queryKey[1], queryKey[2], queryKey[3]),
+        queryFn: ({ queryKey }) =>
+          planFieldConvert(queryKey[1], queryKey[2], queryKey[3]).then((data) => data.data),
       });
     }
     return queryClient.ensureQueryData({
@@ -100,7 +113,7 @@ export const FieldSetting = (props: IFieldSetting) => {
       return onCancel();
     }
 
-    const plan = (await getPlan(fieldRo)).data;
+    const plan = (await getPlan(fieldRo)) as IPlanFieldConvertVo;
     setFieldRo(fieldRo);
     setPlan(plan);
     if (plan && (plan.estimateTime || 0) > 1000) {
@@ -160,6 +173,7 @@ const FieldSettingBase = (props: IFieldSettingBase) => {
   const [alertVisible, setAlertVisible] = useState<boolean>(false);
   const [updateCount, setUpdateCount] = useState<number>(0);
   const [showGraphButton, setShowGraphButton] = useState<boolean>(operator === FieldOperator.Edit);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   const isCreatingSimpleField = useCallback(
     (field: IFieldEditorRo) => {
@@ -212,13 +226,23 @@ const FieldSettingBase = (props: IFieldSettingBase) => {
     onCancel?.();
   };
 
-  const onSave = () => {
-    !updateCount && onConfirm?.();
-    const result = convertFieldRoSchema.safeParse(field);
-    if (result.success) {
-      onConfirm?.(result.data);
+  const onSave = async () => {
+    if (!updateCount) {
+      onConfirm?.();
       return;
     }
+
+    const result = convertFieldRoSchema.safeParse(field);
+    if (result.success) {
+      setIsSaving(true);
+      try {
+        await onConfirm?.(result.data);
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     console.error('fieldConFirm', field);
     console.error('fieldConFirmResult', fromZodError(result.error).message);
     toast.error(`Options Error`, {
@@ -240,13 +264,14 @@ const FieldSettingBase = (props: IFieldSettingBase) => {
   return (
     <>
       <Sheet open={visible} onOpenChange={onOpenChange}>
-        <SheetContent className="w-[320px] p-2" side="right">
+        <SheetContent className="w-[328px] p-2" side="right">
           <div className="flex h-full flex-col gap-2">
             {/* Header */}
             <div className="text-md mx-2 w-full border-b py-2 font-semibold">{title}</div>
             {/* Content Form */}
             {
               <DynamicFieldEditor
+                isPrimary={originField?.isPrimary}
                 field={field}
                 operator={operator}
                 onChange={onFieldEditorChange}
@@ -280,11 +305,11 @@ const FieldSettingBase = (props: IFieldSettingBase) => {
                 )}
               </div>
               <div className="flex gap-2">
-                <Button size={'sm'} variant={'ghost'} onClick={onCancel}>
+                <Button size={'sm'} variant={'ghost'} onClick={onCancel} disabled={isSaving}>
                   {t('common:actions.cancel')}
                 </Button>
-                <Button size={'sm'} onClick={onSave}>
-                  {t('common:actions.save')}
+                <Button size={'sm'} onClick={onSave} disabled={isSaving}>
+                  {isSaving ? <Spin className="size-4" /> : t('common:actions.save')}
                 </Button>
               </div>
             </div>

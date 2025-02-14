@@ -1,7 +1,7 @@
 export enum LocalStorageKeys {
-  Theme = 'ls_theme',
   FieldSystem = 'ls_field_system',
-  ShowActivity = 'ls_show_activity',
+  RecordHistoryVisible = 'ls_record_history_visible',
+  CommentVisible = 'ls_comment_visible',
   ExpandRecordPanelSize = 'ls_expand_record_panel_size',
   DashboardKey = 'ls_dashboard_key',
   ViewFromData = 'ls_view_form_data',
@@ -10,4 +10,13 @@ export enum LocalStorageKeys {
   ViewKanbanCollapsedStack = 'ls_view_kanban_collapsed_stack',
   CompletedGuideMap = 'ls_completed_guide_map',
   ImportAlert = 'ls_import_alert',
+  SearchIndexAlert = 'ls_search_index_alert',
+  ExpandRecordHiddenFieldsVisible = 'ls_expand_record_hidden_fields_visible',
+  EnableGlobalSearch = 'ls_enable_globalSearch',
+  TableSearchFieldsCache = 'ls_table_search_fields_cache',
+  SearchHideNotMatchRow = 'ls_search_hide_not_match_row',
+  PersonalViewMap = 'ls_personal_view_map',
+  LockedViewTipVisible = 'ls_locked_view_tip_visible',
+  RecentPlugins = 'ls_recent_plugins',
+  FloatPluginPosition = 'ls_float_plugins_position',
 }

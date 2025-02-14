@@ -1,7 +1,7 @@
 import { useMutation } from '@tanstack/react-query';
-import type { IGridViewOptions, IFilter } from '@teable/core';
-import { RowHeightLevel, mergeFilter } from '@teable/core';
-import type { IGetRecordsRo, IRangesRo } from '@teable/openapi';
+import type { IGridViewOptions } from '@teable/core';
+import { RowHeightLevel } from '@teable/core';
+import type { IGetRecordsRo, IGroupPointsVo, IRangesRo } from '@teable/openapi';
 import { shareViewCopy } from '@teable/openapi';
 import type {
   CombinedSelection,
@@ -27,9 +27,12 @@ import {
   RowCounter,
   useGridColumnOrder,
   generateLocalId,
+  useGridTooltipStore,
+  RegionType,
+  useGridViewStore,
 } from '@teable/sdk/components';
 import {
-  useGroupPoint,
+  useFields,
   useIsHydrated,
   useIsTouchDevice,
   useRowCount,
@@ -40,23 +43,27 @@ import {
   useView,
 } from '@teable/sdk/hooks';
 import { Skeleton, useToast } from '@teable/ui-lib/shadcn';
+import { uniqueId } from 'lodash';
 import { useRouter } from 'next/router';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useClickAway } from 'react-use';
-import { StatisticMenu } from '@/features/app/blocks/view/grid/components';
+import { DomBox } from '@/features/app/blocks/view/grid/DomBox';
+import { useGridSearchStore } from '@/features/app/blocks/view/grid/useGridSearchStore';
 import { ExpandRecordContainer } from '@/features/app/components/ExpandRecordContainer';
 import type { IExpandRecordContainerRef } from '@/features/app/components/ExpandRecordContainer/types';
-import { useHiddenFields } from '@/features/app/hooks/useHiddenFields';
 import { GIRD_ROW_HEIGHT_DEFINITIONS } from '../../../../view/grid/const';
 import { useSelectionOperation } from '../../../../view/grid/hooks';
-import { useGridViewStore } from '../../../../view/grid/store/gridView';
 
-export const GridViewBase = () => {
+interface IGridViewProps {
+  groupPointsServerData?: IGroupPointsVo;
+}
+
+export const GridViewBase = (props: IGridViewProps) => {
+  const { groupPointsServerData } = props;
   const view = useView();
   const tableId = useTableId();
   const router = useRouter();
   const isHydrated = useIsHydrated();
-  const groupPoints = useGroupPoint();
   const gridRef = useRef<IGridRef>(null);
   const container = useRef<HTMLDivElement>(null);
   const expandRecordRef = useRef<IExpandRecordContainerRef>(null);
@@ -72,19 +79,26 @@ export const GridViewBase = () => {
   const { columnStatistics } = useGridColumnStatistics(columns);
   const { onColumnOrdered } = useGridColumnOrder();
   const { searchQuery: search } = useSearch();
-  const hiddenFields = useHiddenFields();
+  const visibleFields = useFields();
   const customIcons = useGridIcons();
+  const { openTooltip, closeTooltip } = useGridTooltipStore();
+  const { setGridRef, searchCursor } = useGridSearchStore();
 
   const prepare = isHydrated && view && columns.length;
-  const { filter, sort, group } = view ?? {};
+  const { filter, sort } = view ?? {};
   const realRowCount = rowCount ?? ssrRecords?.length ?? 0;
 
   const groupCollection = useGridGroupCollection();
 
-  const { viewGroupQuery, collapsedGroupIds, onCollapsedGroupChanged } = useGridCollapsedGroup(
-    generateLocalId(tableId, view?.id),
-    groupPoints
-  );
+  useEffect(() => {
+    setGridRef(gridRef);
+  }, [setGridRef]);
+
+  const {
+    viewQuery: viewQueryWithGroup,
+    collapsedGroupIds,
+    onCollapsedGroupChanged,
+  } = useGridCollapsedGroup(generateLocalId(tableId, view?.id));
 
   const { mutateAsync: copyReq } = useMutation({
     mutationFn: (copyRo: IRangesRo) =>
@@ -92,26 +106,30 @@ export const GridViewBase = () => {
         ...copyRo,
         orderBy: view?.sort?.sortObjs,
         groupBy: view?.group,
-        filter: mergeFilter(view?.filter, viewGroupQuery?.filter),
+        filter: view?.filter,
         search,
-        excludeFieldIds: hiddenFields.map((field) => field.id),
+        projection: visibleFields.map((field) => field.id),
+        collapsedGroupIds: viewQueryWithGroup?.collapsedGroupIds,
       }),
   });
-  const { copy } = useSelectionOperation({ copyReq });
+  const { copy } = useSelectionOperation({
+    copyReq,
+    collapsedGroupIds: collapsedGroupIds ? Array.from(collapsedGroupIds) : undefined,
+  });
 
   const viewQuery = useMemo(() => {
-    const mergedFilter = mergeFilter(filter, viewGroupQuery?.filter);
     return {
-      filter: mergedFilter as IFilter,
+      filter,
       orderBy: sort?.sortObjs as IGetRecordsRo['orderBy'],
-      groupBy: group as IGetRecordsRo['groupBy'],
+      ...viewQueryWithGroup,
     };
-  }, [filter, viewGroupQuery?.filter, sort?.sortObjs, group]);
+  }, [filter, sort?.sortObjs, viewQueryWithGroup]);
 
-  const { onVisibleRegionChanged, recordMap } = useGridAsyncRecords(
+  const { recordMap, groupPoints, onVisibleRegionChanged, searchHitIndex } = useGridAsyncRecords(
     ssrRecords,
     undefined,
-    viewQuery
+    viewQuery,
+    groupPointsServerData
   );
 
   useClickAway(container, () => {
@@ -204,6 +222,23 @@ export const GridViewBase = () => {
     [columns, openStatisticMenu]
   );
 
+  const componentId = useMemo(() => uniqueId('shared-grid-view-'), []);
+
+  const onItemHovered = (type: RegionType, bounds: IRectangle, cellItem: ICellItem) => {
+    const [columnIndex] = cellItem;
+    const { description } = columns[columnIndex] ?? {};
+
+    closeTooltip();
+
+    if (type === RegionType.ColumnDescription && description) {
+      openTooltip({
+        id: componentId,
+        text: description,
+        position: bounds,
+      });
+    }
+  };
+
   return (
     <div ref={container} className="relative size-full overflow-hidden">
       {prepare ? (
@@ -218,6 +253,8 @@ export const GridViewBase = () => {
             columnStatistics={columnStatistics}
             freezeColumnCount={isTouchDevice ? 0 : 1}
             columns={columns}
+            searchCursor={searchCursor}
+            searchHitIndex={searchHitIndex}
             customIcons={customIcons}
             rowControls={rowControls}
             style={{
@@ -231,6 +268,7 @@ export const GridViewBase = () => {
             onVisibleRegionChanged={onVisibleRegionChanged}
             onSelectionChanged={onSelectionChanged}
             onCopy={onCopy}
+            onItemHovered={onItemHovered}
             onRowExpand={onRowExpandInner}
             onColumnResize={onColumnResize}
             onColumnOrdered={onColumnOrdered}
@@ -248,7 +286,7 @@ export const GridViewBase = () => {
           </div>
         </div>
       )}
-      <StatisticMenu />
+      <DomBox id={componentId} />
       <ExpandRecordContainer ref={expandRecordRef} recordServerData={ssrRecord} />
     </div>
   );

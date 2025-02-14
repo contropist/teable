@@ -2,7 +2,7 @@
 import type { INestApplication } from '@nestjs/common';
 import type { IFieldRo, ISelectFieldOptions } from '@teable/core';
 import { CellFormat, DriverClient, FieldKeyType, FieldType, Relationship } from '@teable/core';
-import type { ITableFullVo } from '@teable/openapi';
+import { updateRecords, type ITableFullVo } from '@teable/openapi';
 import {
   convertField,
   createField,
@@ -11,7 +11,8 @@ import {
   deleteField,
   deleteRecord,
   deleteRecords,
-  deleteTable,
+  permanentDeleteTable,
+  duplicateRecord,
   getField,
   getRecord,
   getRecords,
@@ -22,7 +23,9 @@ import {
 
 describe('OpenAPI RecordController (e2e)', () => {
   let app: INestApplication;
+
   const baseId = globalThis.testConfig.baseId;
+  const userId = globalThis.testConfig.userId;
 
   beforeAll(async () => {
     const appCtx = await initApp();
@@ -40,7 +43,7 @@ describe('OpenAPI RecordController (e2e)', () => {
     });
 
     afterEach(async () => {
-      await deleteTable(baseId, table.id);
+      await permanentDeleteTable(baseId, table.id);
     });
 
     it('should get records', async () => {
@@ -154,6 +157,10 @@ describe('OpenAPI RecordController (e2e)', () => {
         },
       });
 
+      const dateField = await createField(table.id, {
+        type: FieldType.Date,
+      });
+
       const res1 = await updateRecord(table.id, table.records[0].id, {
         record: { fields: { [singleUserField.id]: 'test' } },
         fieldKeyType: FieldKeyType.Id,
@@ -162,6 +169,12 @@ describe('OpenAPI RecordController (e2e)', () => {
 
       const res2 = await updateRecord(table.id, table.records[0].id, {
         record: { fields: { [multiUserField.id]: 'test@e2e.com' } },
+        fieldKeyType: FieldKeyType.Id,
+        typecast: true,
+      });
+
+      const res3 = await updateRecord(table.id, table.records[0].id, {
+        record: { fields: { [dateField.id]: 'now' } },
         fieldKeyType: FieldKeyType.Id,
         typecast: true,
       });
@@ -176,6 +189,64 @@ describe('OpenAPI RecordController (e2e)', () => {
           title: 'test',
         },
       ]);
+
+      expect(res3.fields[dateField.id]).toBeDefined();
+      expect(new Date(res3.fields[dateField.id] as string).toISOString().slice(0, -7)).toEqual(
+        new Date().toISOString().slice(0, -7)
+      );
+    });
+
+    it('should not auto create options when preventAutoNewOptions is true', async () => {
+      const singleSelectField = await createField(table.id, {
+        type: FieldType.SingleSelect,
+        options: {
+          choices: [{ name: 'red' }],
+          preventAutoNewOptions: true,
+        },
+      });
+
+      const multiSelectField = await createField(table.id, {
+        type: FieldType.MultipleSelect,
+        options: {
+          choices: [{ name: 'red' }],
+          preventAutoNewOptions: true,
+        },
+      });
+
+      const records1 = (
+        await updateRecords(table.id, {
+          records: [
+            {
+              id: table.records[0].id,
+              fields: { [singleSelectField.id]: 'red' },
+            },
+            {
+              id: table.records[1].id,
+              fields: { [singleSelectField.id]: 'blue' },
+            },
+          ],
+          fieldKeyType: FieldKeyType.Id,
+          typecast: true,
+        })
+      ).data;
+
+      expect(records1[0].fields[singleSelectField.id]).toEqual('red');
+      expect(records1[1].fields[singleSelectField.id]).toBeUndefined();
+
+      const records2 = (
+        await updateRecords(table.id, {
+          records: [
+            {
+              id: table.records[0].id,
+              fields: { [multiSelectField.id]: ['red', 'blue'] },
+            },
+          ],
+          fieldKeyType: FieldKeyType.Id,
+          typecast: true,
+        })
+      ).data;
+
+      expect(records2[0].fields[multiSelectField.id]).toEqual(['red']);
     });
 
     it('should batch create records', async () => {
@@ -263,6 +334,31 @@ describe('OpenAPI RecordController (e2e)', () => {
         ],
       });
     });
+
+    it('should duplicate a record', async () => {
+      const value1 = 'New Record';
+      const addRecordRes = await createRecords(table.id, {
+        fieldKeyType: FieldKeyType.Id,
+        records: [
+          {
+            fields: {
+              [table.fields[0].id]: value1,
+            },
+          },
+        ],
+      });
+      const addRecord = await getRecord(table.id, addRecordRes.records[0].id, undefined, 200);
+      expect(addRecord.fields[table.fields[0].id]).toEqual(value1);
+
+      const viewId = table.views[0].id;
+      const duplicateRes = await duplicateRecord(table.id, addRecord.id, {
+        viewId,
+        anchorId: addRecord.id,
+        position: 'after',
+      });
+      const record = await getRecord(table.id, duplicateRes.records[0].id, undefined, 200);
+      expect(record.fields[table.fields[0].id]).toEqual(value1);
+    });
   });
 
   describe('validate record value by field validation', () => {
@@ -275,7 +371,7 @@ describe('OpenAPI RecordController (e2e)', () => {
     });
 
     afterAll(async () => {
-      await deleteTable(baseId, table.id);
+      await permanentDeleteTable(baseId, table.id);
     });
 
     const clearRecords = async () => {
@@ -385,7 +481,7 @@ describe('OpenAPI RecordController (e2e)', () => {
     });
 
     afterAll(async () => {
-      await deleteTable(baseId, table.id);
+      await permanentDeleteTable(baseId, table.id);
     });
 
     it('should create a record and auto calculate computed field', async () => {
@@ -476,8 +572,8 @@ describe('OpenAPI RecordController (e2e)', () => {
     });
 
     afterEach(async () => {
-      await deleteTable(baseId, table1.id);
-      await deleteTable(baseId, table2.id);
+      await permanentDeleteTable(baseId, table1.id);
+      await permanentDeleteTable(baseId, table2.id);
     });
 
     it('should create a record with error field formula', async () => {
@@ -558,6 +654,132 @@ describe('OpenAPI RecordController (e2e)', () => {
 
       expect(data.records[0].fields[lookupField.id]).toBeUndefined();
       expect(data.records[0].fields[rollup.id]).toBeUndefined();
+    });
+  });
+
+  describe('create record with default value', () => {
+    let table: ITableFullVo;
+    beforeAll(async () => {
+      table = await createTable(baseId, {
+        name: 'table1',
+      });
+    });
+
+    afterAll(async () => {
+      await permanentDeleteTable(baseId, table.id);
+    });
+
+    it('should create a record with default single select', async () => {
+      const field = await createField(table.id, {
+        type: FieldType.SingleSelect,
+        options: {
+          choices: [{ name: 'default value' }],
+          defaultValue: 'default value',
+        },
+      });
+
+      const { records } = await createRecords(table.id, {
+        records: [
+          {
+            fields: {},
+          },
+        ],
+      });
+
+      expect(records[0].fields[field.id]).toEqual('default value');
+    });
+
+    it('should create a record with default multiple select', async () => {
+      const field = await createField(table.id, {
+        type: FieldType.MultipleSelect,
+        options: {
+          choices: [{ name: 'default value' }, { name: 'default value2' }],
+          defaultValue: ['default value', 'default value2'],
+        },
+      });
+
+      const { records } = await createRecords(table.id, {
+        records: [
+          {
+            fields: {},
+          },
+        ],
+      });
+
+      expect(records[0].fields[field.id]).toEqual(['default value', 'default value2']);
+    });
+
+    it('should create a record with default number', async () => {
+      const field = await createField(table.id, {
+        type: FieldType.Number,
+        options: {
+          defaultValue: 1,
+        },
+      });
+
+      const { records } = await createRecords(table.id, {
+        records: [
+          {
+            fields: {},
+          },
+        ],
+      });
+
+      expect(records[0].fields[field.id]).toEqual(1);
+    });
+
+    it('should create a record with default user', async () => {
+      const field = await createField(table.id, {
+        type: FieldType.User,
+        options: {
+          defaultValue: userId,
+        },
+      });
+      const field2 = await createField(table.id, {
+        type: FieldType.User,
+        options: {
+          isMultiple: true,
+          defaultValue: ['me'],
+        },
+      });
+      const field3 = await createField(table.id, {
+        type: FieldType.User,
+        options: {
+          isMultiple: true,
+          defaultValue: [userId],
+        },
+      });
+
+      const { records } = await createRecords(table.id, {
+        records: [
+          {
+            fields: {},
+          },
+        ],
+      });
+
+      expect(records[0].fields[field.id]).toMatchObject({
+        id: userId,
+        title: expect.any(String),
+        email: expect.any(String),
+        avatarUrl: expect.any(String),
+      });
+      expect(records[0].fields[field2.id]).toMatchObject([
+        {
+          id: userId,
+          title: expect.any(String),
+          email: expect.any(String),
+          avatarUrl: expect.any(String),
+        },
+      ]);
+      expect(records[0].fields[field3.id]).toMatchObject([
+        {
+          id: userId,
+          title: expect.any(String),
+          email: expect.any(String),
+          avatarUrl: expect.any(String),
+        },
+      ]);
     });
   });
 });

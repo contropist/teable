@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import type { ICreateOpBuilder, IOpBuilder, IOpContextBase, IOtOperation } from '@teable/core';
+import type {
+  ICreateOpBuilder,
+  IOpBuilder,
+  IOpContextBase,
+  IOtOperation,
+  IRecord,
+} from '@teable/core';
 import {
   FieldOpBuilder,
   IdPrefix,
@@ -86,13 +92,16 @@ export class EventEmitterService {
 
     observable
       .pipe(
-        groupBy((event) => event.name),
+        groupBy((event) => {
+          const tableId = get(event, 'payload.tableId');
+          return tableId ? `${tableId}_${event.name}` : event.name;
+        }),
         mergeMap((project) => this.aggregateEventsByGroup(project))
       )
       .subscribe((next) => this.handleEventResult(next));
   }
 
-  private aggregateEventsByGroup(project: GroupedObservable<Events, OpEvent>): Observable<OpEvent> {
+  private aggregateEventsByGroup(project: GroupedObservable<string, OpEvent>): Observable<OpEvent> {
     return project.pipe(
       toArray(),
       map((groupedEvents) => this.combineEvents(groupedEvents)),
@@ -201,7 +210,7 @@ export class EventEmitterService {
     const entry = this.cls.get('entry');
     return {
       baseId: docId,
-      tableId: docId,
+      tableId: id.startsWith(IdPrefix.Table) ? id : docId,
       viewId: id,
       fieldId: id,
       recordId: id,
@@ -231,7 +240,10 @@ export class EventEmitterService {
       return;
     }
 
-    if (existingEvent.rawOpType === RawOpType.Create && event.name === Events.TABLE_RECORD_UPDATE) {
+    if (
+      [RawOpType.Create, RawOpType.Edit].includes(existingEvent.rawOpType) &&
+      event.name === Events.TABLE_RECORD_UPDATE
+    ) {
       const fields = this.getUpdateFieldsFromEvent(event as RecordUpdateEvent);
       event = this.combineUpdateEvents(existingEvent as RecordCreateEvent, fields);
     }
@@ -259,7 +271,10 @@ export class EventEmitterService {
         ...existingEvent.payload,
         record: {
           ...existingEvent.payload.record,
-          fields,
+          fields: {
+            ...(existingEvent.payload.record as IRecord).fields,
+            ...fields,
+          },
         },
       },
     };
@@ -270,6 +285,12 @@ export class EventEmitterService {
     const { context, ...payload } = plain;
     const eventName = this.eventNameMapping[action]?.[docType];
     if (!eventName) return undefined;
+
+    const oldField = this.cls.get('oldField');
+
+    if (eventName === Events.TABLE_RECORD_UPDATE) {
+      payload.oldField = oldField;
+    }
 
     return match(docType)
       .with(IdPrefix.Table, () => TableEventFactory.create(eventName, payload, context))

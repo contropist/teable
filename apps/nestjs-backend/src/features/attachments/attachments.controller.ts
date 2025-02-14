@@ -17,14 +17,12 @@ import type { INotifyVo, SignatureVo } from '@teable/openapi';
 import { Response, Request } from 'express';
 import { ZodValidationPipe } from '../../zod.validation.pipe';
 import { Public } from '../auth/decorators/public.decorator';
-import { TokenAccess } from '../auth/decorators/token.decorator';
 import { AuthGuard } from '../auth/guard/auth.guard';
 import { AttachmentsService } from './attachments.service';
 import { DynamicAuthGuardFactory } from './guard/auth.guard';
 
 @Controller('api/attachments')
 @Public()
-@TokenAccess()
 export class AttachmentsController {
   constructor(private readonly attachmentsService: AttachmentsService) {}
 
@@ -55,17 +53,18 @@ export class AttachmentsController {
     }
     const { fileStream, headers } = await this.attachmentsService.readLocalFile(path, token);
     if (responseContentDisposition) {
-      // handle filename*=UTF-8''filename
-      const filenameRegex = /filename="(.+?)"/;
-      const match = responseContentDisposition.match(filenameRegex);
-      responseContentDisposition = match?.[1]
-        ? responseContentDisposition.replace(
-            filenameRegex,
-            `filename*=UTF-8''${encodeURIComponent(match[1])}`
-          )
-        : '';
-      headers['Content-Disposition'] = responseContentDisposition;
+      const fileNameMatch =
+        responseContentDisposition.match(/filename\*=UTF-8''([^;]+)/) ||
+        responseContentDisposition.match(/filename="?([^"]+)"?/);
+      if (fileNameMatch) {
+        const fileName = fileNameMatch[1] as string;
+        headers['Content-Disposition'] =
+          `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+      } else {
+        headers['Content-Disposition'] = responseContentDisposition;
+      }
     }
+    headers['Cross-Origin-Resource-Policy'] = 'unsafe-none';
     res.set(headers);
     return new StreamableFile(fileStream);
   }

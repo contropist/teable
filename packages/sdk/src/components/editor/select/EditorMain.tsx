@@ -1,7 +1,8 @@
 import { Plus } from '@teable/icons';
-import { Command, CommandInput, CommandItem, cn } from '@teable/ui-lib';
+import { Command, CommandInput, CommandItem } from '@teable/ui-lib';
 import type { ForwardRefRenderFunction } from 'react';
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useTranslation } from '../../../context/app/i18n';
 import type { ISelectOption } from '../../cell-value';
 import type { ICellEditor, IEditorRef } from '../type';
 import { OptionList } from './components';
@@ -9,6 +10,7 @@ import { OptionList } from './components';
 export type ISelectValue<T extends boolean> = T extends true ? string[] : string;
 
 export interface ISelectEditorMain<T extends boolean> extends ICellEditor<ISelectValue<T>> {
+  preventAutoNewOptions?: boolean;
   options?: ISelectOption[];
   isMultiple?: T;
   style?: React.CSSProperties;
@@ -27,6 +29,7 @@ const SelectEditorMainBase: ForwardRefRenderFunction<
   ISelectEditorMain<boolean>
 > = (props, ref) => {
   const {
+    preventAutoNewOptions,
     value: originValue,
     options = [],
     isMultiple,
@@ -39,6 +42,7 @@ const SelectEditorMainBase: ForwardRefRenderFunction<
   const [value, setValue] = useState<string[]>(getValue(originValue));
   const [searchValue, setSearchValue] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const { t } = useTranslation();
 
   useImperativeHandle(ref, () => ({
     focus: () => {
@@ -76,7 +80,7 @@ const SelectEditorMainBase: ForwardRefRenderFunction<
   );
 
   const onOptionAddInner = async () => {
-    if (!searchValue) return;
+    if (!searchValue || preventAutoNewOptions) return;
     setSearchValue('');
     await onOptionAdd?.(searchValue);
     if (isMultiple) {
@@ -88,14 +92,12 @@ const SelectEditorMainBase: ForwardRefRenderFunction<
     onChange?.(searchValue);
   };
 
-  const optionAddable =
-    searchValue && filteredOptions.findIndex((v) => v.value === searchValue) === -1;
-
   return (
     <Command className={className} style={style} shouldFilter={false}>
       <CommandInput
+        className="h-8 text-[13px]"
         ref={inputRef}
-        placeholder="Search option"
+        placeholder={t('common.search.placeholder')}
         value={searchValue}
         onValueChange={(value) => setSearchValue(value)}
         onKeyDown={async (e) => {
@@ -106,15 +108,19 @@ const SelectEditorMainBase: ForwardRefRenderFunction<
         }}
       />
       <OptionList options={filteredOptions} onSelect={onSelect} checkIsActive={checkIsActive} />
-      {(filteredOptions.length === 0 || optionAddable) && (
-        <CommandItem
-          className={cn('items-center justify-center', !optionAddable && 'opacity-0 h-0 p-0')}
-          onSelect={onOptionAddInner}
-        >
-          <Plus className="size-4 shrink-0" />
-          <span className="ml-2 truncate">{`Add an option '${searchValue}'`}</span>
-        </CommandItem>
-      )}
+      {filteredOptions.length === 0 &&
+        (onOptionAdd && !preventAutoNewOptions ? (
+          <CommandItem className="items-center justify-center" onSelect={onOptionAddInner}>
+            <Plus className="size-4 shrink-0" />
+            <span className="ml-2 truncate text-[13px]">
+              {t('editor.select.addOption', { option: searchValue })}
+            </span>
+          </CommandItem>
+        ) : (
+          <CommandItem className="items-center justify-center">
+            <span className="ml-2 truncate text-[13px]">{t('common.empty')}</span>
+          </CommandItem>
+        ))}
     </Command>
   );
 };

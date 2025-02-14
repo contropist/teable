@@ -7,15 +7,16 @@ import {
   NumberFormattingType,
   Relationship,
 } from '@teable/core';
-import type { ITableFullVo } from '@teable/openapi';
+import { getRecord, updateRecords, type ITableFullVo } from '@teable/openapi';
 import {
   createField,
   createRecords,
   createTable,
-  deleteTable,
+  permanentDeleteTable,
   getRecords,
   initApp,
   updateRecord,
+  convertField,
 } from './utils/init-app';
 
 describe('OpenAPI formula (e2e)', () => {
@@ -72,7 +73,7 @@ describe('OpenAPI formula (e2e)', () => {
   });
 
   afterEach(async () => {
-    await deleteTable(baseId, table1Id);
+    await permanentDeleteTable(baseId, table1Id);
   });
 
   it('should response calculate record after create', async () => {
@@ -176,5 +177,129 @@ describe('OpenAPI formula (e2e)', () => {
       },
     });
     expect(record1.fields[formulaField.name]).toEqual('text');
+  });
+
+  describe('safe calculate', () => {
+    let table: ITableFullVo;
+    beforeEach(async () => {
+      table = await createTable(baseId, { name: 'table safe' });
+    });
+
+    afterEach(async () => {
+      await permanentDeleteTable(baseId, table.id);
+    });
+
+    it('should safe calculate error function', async () => {
+      const field = await createField(table.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: "'x'*10",
+        },
+      });
+
+      expect(field).toBeDefined();
+    });
+
+    it('should calculate formula with timeZone', async () => {
+      const field1 = await createField(table.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: "DAY('2024-02-29T00:00:00+08:00')",
+          timeZone: 'Asia/Shanghai',
+        },
+      });
+
+      const record1 = await getRecord(table.id, table.records[0].id);
+      expect(record1.data.fields[field1.name]).toEqual(29);
+
+      const field2 = await createField(table.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: "DAY('2024-02-28T00:00:00+09:00')",
+          timeZone: 'Asia/Shanghai',
+        },
+      });
+
+      const record2 = await getRecord(table.id, table.records[0].id);
+      expect(record2.data.fields[field2.name]).toEqual(27);
+    });
+
+    it('should calculate auto number and number field', async () => {
+      const autoNumberField = await createField(table.id, {
+        name: 'ttttttt',
+        type: FieldType.AutoNumber,
+      });
+
+      const numberField = await createField(table.id, {
+        type: FieldType.Number,
+      });
+      const numberField1 = await createField(table.id, {
+        type: FieldType.Number,
+      });
+
+      await updateRecords(table.id, {
+        fieldKeyType: FieldKeyType.Name,
+        records: table.records.map((record) => ({
+          id: record.id,
+          fields: {
+            [numberField.name]: 2,
+            [numberField1.name]: 3,
+          },
+        })),
+      });
+
+      const formulaField = await createField(table.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `{${autoNumberField.id}} & "-" & {${numberField.id}} & "-" & {${numberField1.id}}`,
+        },
+      });
+
+      const record = await getRecords(table.id);
+      expect(record.records[0].fields[formulaField.name]).toEqual('1-2-3');
+      expect(record.records[0].fields[autoNumberField.name]).toEqual(1);
+
+      await convertField(table.id, formulaField.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `{${autoNumberField.id}} & "-" & {${numberField.id}}`,
+        },
+      });
+
+      const record2 = await getRecord(table.id, table.records[0].id);
+      expect(record2.data.fields[autoNumberField.name]).toEqual(1);
+      expect(record2.data.fields[formulaField.name]).toEqual('1-2');
+
+      await updateRecord(table.id, table.records[0].id, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [numberField.name]: 22,
+          },
+        },
+      });
+
+      const record3 = await getRecord(table.id, table.records[0].id);
+      expect(record3.data.fields[formulaField.name]).toEqual('1-22');
+      expect(record2.data.fields[autoNumberField.name]).toEqual(1);
+    });
+
+    it('should update record by name wile have create last modified field', async () => {
+      await createField(table.id, {
+        type: FieldType.LastModifiedTime,
+      });
+
+      await updateRecord(table.id, table.records[0].id, {
+        fieldKeyType: FieldKeyType.Name,
+        record: {
+          fields: {
+            [table.fields[0].name]: '1',
+          },
+        },
+      });
+
+      const record = await getRecord(table.id, table.records[0].id);
+      expect(record.data.fields[table.fields[0].name]).toEqual('1');
+    });
   });
 });

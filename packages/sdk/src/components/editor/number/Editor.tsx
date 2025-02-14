@@ -6,9 +6,18 @@ import type { ICellEditor, IEditorRef } from '../type';
 
 export const NumberEditorBase: ForwardRefRenderFunction<
   IEditorRef<number>,
-  ICellEditor<number | null> & { placeholder?: string }
+  ICellEditor<number | null> & { placeholder?: string; saveOnChange?: boolean }
 > = (props, ref) => {
-  const { value, onChange, className, readonly, style, saveOnBlur = true } = props;
+  const {
+    value,
+    onChange,
+    className,
+    readonly,
+    style,
+    saveOnBlur = true,
+    saveOnChange = false,
+    placeholder,
+  } = props;
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [str, setStr] = useState<string | null>(value ? value.toString() : '');
 
@@ -27,7 +36,9 @@ export const NumberEditorBase: ForwardRefRenderFunction<
   };
 
   const onChangeHandler = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setStr(e.target.value);
+    const newValue = e.target.value;
+    setStr(newValue);
+    saveOnChange && onChange?.(parseStringToNumber(newValue));
   };
 
   return (
@@ -37,8 +48,9 @@ export const NumberEditorBase: ForwardRefRenderFunction<
       className={cn('h-10 sm:h-8', className)}
       value={str || ''}
       onChange={onChangeHandler}
-      onBlur={() => saveOnBlur && saveValue()}
-      disabled={readonly}
+      onBlur={() => saveOnBlur && !saveOnChange && saveValue()}
+      readOnly={readonly}
+      placeholder={placeholder}
     />
   );
 };

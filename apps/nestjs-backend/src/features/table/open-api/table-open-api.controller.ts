@@ -1,26 +1,26 @@
 /* eslint-disable sonarjs/no-duplicate-string */
-import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
-import type { ITableFullVo, ITableListVo, ITableVo } from '@teable/openapi';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import type { IGetAbnormalVo, ITableFullVo, ITableListVo, ITableVo } from '@teable/openapi';
 import {
   tableRoSchema,
   ICreateTableWithDefault,
   dbTableNameRoSchema,
-  getGraphRoSchema,
   IDbTableNameRo,
-  IGetGraphRo,
-  ISqlQuerySchema,
   ITableDescriptionRo,
   ITableIconRo,
   ITableNameRo,
   IUpdateOrderRo,
-  sqlQuerySchema,
   tableDescriptionRoSchema,
   tableIconRoSchema,
   tableNameRoSchema,
   updateOrderRoSchema,
+  IToggleIndexRo,
+  toggleIndexRoSchema,
+  TableIndex,
 } from '@teable/openapi';
 import { ZodValidationPipe } from '../../../zod.validation.pipe';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { TableIndexService } from '../table-index.service';
 import { TablePermissionService } from '../table-permission.service';
 import { TableService } from '../table.service';
 import { TableOpenApiService } from './table-open-api.service';
@@ -31,6 +31,7 @@ export class TableController {
   constructor(
     private readonly tableService: TableService,
     private readonly tableOpenApiService: TableOpenApiService,
+    private readonly tableIndexService: TableIndexService,
     private readonly tablePermissionService: TablePermissionService
   ) {}
 
@@ -128,28 +129,10 @@ export class TableController {
     return await this.tableOpenApiService.deleteTable(baseId, tableId);
   }
 
-  @Delete('arbitrary/:tableId')
+  @Delete(':tableId/permanent')
   @Permissions('table|delete')
-  deleteTableArbitrary(@Param('baseId') baseId: string, @Param('tableId') tableId: string) {
-    return this.tableOpenApiService.deleteTable(baseId, tableId, true);
-  }
-
-  @Permissions('table|read')
-  @Post(':tableId/graph')
-  async getCellGraph(
-    @Param('tableId') tableId: string,
-    @Body(new ZodValidationPipe(getGraphRoSchema)) { cell }: IGetGraphRo
-  ) {
-    return await this.tableOpenApiService.getGraph(tableId, cell);
-  }
-
-  @Permissions('table|read')
-  @Post(':tableId/sql-query')
-  async sqlQuery(
-    @Param('tableId') tableId: string,
-    @Query(new ZodValidationPipe(sqlQuerySchema)) query: ISqlQuerySchema
-  ) {
-    return await this.tableOpenApiService.sqlQuery(tableId, query.viewId, query.sql);
+  permanentDeleteTable(@Param('baseId') baseId: string, @Param('tableId') tableId: string) {
+    return this.tableOpenApiService.permanentDeleteTables(baseId, [tableId]);
   }
 
   @Permissions('table|read')
@@ -181,5 +164,35 @@ export class TableController {
   @Get('/socket/doc-ids')
   async getDocIds(@Param('baseId') baseId: string) {
     return this.tableService.getDocIdsByQuery(baseId, undefined);
+  }
+
+  @Post(':tableId/index')
+  async toggleIndex(
+    @Param('baseId') baseId: string,
+    @Param('tableId') tableId: string,
+    @Body(new ZodValidationPipe(toggleIndexRoSchema)) searchIndexRo: IToggleIndexRo
+  ) {
+    return this.tableIndexService.toggleIndex(tableId, searchIndexRo);
+  }
+
+  @Get(':tableId/activated-index')
+  async getTableIndex(@Param('tableId') tableId: string): Promise<string[]> {
+    return this.tableIndexService.getActivatedTableIndexes(tableId);
+  }
+
+  @Get(':tableId/abnormal-index')
+  async getAbnormalTableIndex(
+    @Param('tableId') tableId: string,
+    @Query('type') tableIndexType: TableIndex
+  ): Promise<IGetAbnormalVo> {
+    return this.tableIndexService.getAbnormalTableIndex(tableId, tableIndexType);
+  }
+
+  @Patch(':tableId/index/repair')
+  async repairIndex(
+    @Param('tableId') tableId: string,
+    @Query('type') tableIndexType: TableIndex
+  ): Promise<void> {
+    return this.tableIndexService.repairIndex(tableId, tableIndexType);
   }
 }

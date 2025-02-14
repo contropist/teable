@@ -1,5 +1,5 @@
 import type { IRecord } from '@teable/core';
-import { useTableId } from '@teable/sdk/hooks';
+import { useTableId, useViewId } from '@teable/sdk/hooks';
 import { useRouter } from 'next/router';
 import { forwardRef, useCallback } from 'react';
 import { ExpandRecordContainerBase } from './ExpandRecordContainerBase';
@@ -12,13 +12,19 @@ export const ExpandRecordContainer = forwardRef<
   const { recordServerData } = props;
   const router = useRouter();
   const tableId = useTableId();
+  const viewId = useViewId();
   const recordId = router.query.recordId as string;
 
   const onClose = useCallback(() => {
     if (!recordId) {
       return;
     }
-    const { recordId: _recordId, fromNotify: _fromNotify, ...resetQuery } = router.query;
+    const {
+      recordId: _recordId,
+      fromNotify: _fromNotify,
+      commentId: _commentId,
+      ...resetQuery
+    } = router.query;
     router.push(
       {
         pathname: router.pathname,
@@ -55,6 +61,7 @@ export const ExpandRecordContainer = forwardRef<
     <ExpandRecordContainerBase
       ref={forwardRef}
       tableId={tableId}
+      viewId={viewId}
       recordServerData={recordServerData}
       onClose={onClose}
       onUpdateRecordIdCallback={onUpdateRecordIdCallback}

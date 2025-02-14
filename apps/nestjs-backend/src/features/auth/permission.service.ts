@@ -1,11 +1,12 @@
 import { ForbiddenException, NotFoundException, Injectable } from '@nestjs/common';
-import type { BaseRole, PermissionAction, SpaceRole } from '@teable/core';
+import type { IBaseRole, Action } from '@teable/core';
 import { IdPrefix, getPermissions } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
-import { intersection } from 'lodash';
+import { CollaboratorType } from '@teable/openapi';
+import { intersection, union } from 'lodash';
 import { ClsService } from 'nestjs-cls';
-import { RoleType } from '../../../../../packages/core/src/auth/types';
 import type { IClsStore } from '../../types/cls';
+import { getMaxLevelRole } from '../../utils/get-max-level-role';
 
 @Injectable()
 export class PermissionService {
@@ -14,58 +15,62 @@ export class PermissionService {
     private readonly cls: ClsService<IClsStore>
   ) {}
 
+  private getDepartmentIds() {
+    const departments = this.cls.get('organization.departments');
+    return departments?.map((department) => department.id) || [];
+  }
+
   async getRoleBySpaceId(spaceId: string) {
     const userId = this.cls.get('user.id');
-
-    const collaborator = await this.prismaService.collaborator.findFirst({
+    const departmentIds = this.getDepartmentIds();
+    const collaborators = await this.prismaService.collaborator.findMany({
       where: {
-        userId,
-        spaceId,
-        baseId: null,
-        deletedTime: null,
+        principalId: { in: [...departmentIds, userId] },
+        resourceId: spaceId,
+        resourceType: CollaboratorType.Space,
       },
       select: { roleName: true },
     });
-    if (!collaborator) {
-      throw new ForbiddenException(`can't find collaborator`);
+    if (!collaborators.length) {
+      return null;
     }
-    return collaborator.roleName as SpaceRole;
+    return getMaxLevelRole(collaborators);
   }
 
   async getRoleByBaseId(baseId: string) {
+    const departmentIds = this.getDepartmentIds();
     const userId = this.cls.get('user.id');
 
-    const collaborator = await this.prismaService.collaborator.findFirst({
+    const collaborators = await this.prismaService.collaborator.findMany({
       where: {
-        userId,
-        spaceId: null,
-        baseId,
-        deletedTime: null,
+        principalId: { in: [...departmentIds, userId] },
+        resourceId: baseId,
+        resourceType: CollaboratorType.Base,
       },
       select: { roleName: true },
     });
-    if (!collaborator) {
+    if (!collaborators.length) {
       return null;
     }
-    return collaborator.roleName as BaseRole;
+    return getMaxLevelRole(collaborators) as IBaseRole;
   }
 
   async getOAuthAccessBy(userId: string) {
-    const collaborator = await this.prismaService.txClient().collaborator.findMany({
+    const departmentIds = this.getDepartmentIds();
+    const collaborators = await this.prismaService.txClient().collaborator.findMany({
       where: {
-        userId,
-        deletedTime: null,
+        principalId: { in: [...departmentIds, userId] },
       },
-      select: { roleName: true, spaceId: true, baseId: true },
+      select: { roleName: true, resourceId: true, resourceType: true },
     });
 
     const spaceIds: string[] = [];
     const baseIds: string[] = [];
-    collaborator.forEach(({ baseId, spaceId }) => {
-      if (baseId) {
-        baseIds.push(baseId);
-      } else if (spaceId) {
-        spaceIds.push(spaceId);
+    collaborators.forEach(({ resourceId, resourceType }) => {
+      if (resourceType === CollaboratorType.Base) {
+        baseIds.push(resourceId);
+      } else if (resourceType === CollaboratorType.Space) {
+        spaceIds.push(resourceId);
       }
     });
 
@@ -83,8 +88,8 @@ export class PermissionService {
       where: { id: accessTokenId },
       select: { scopes: true, spaceIds: true, baseIds: true, clientId: true, userId: true },
     });
-    const scopes = JSON.parse(stringifyScopes) as PermissionAction[];
-    if (clientId) {
+    const scopes = JSON.parse(stringifyScopes) as Action[];
+    if (clientId && clientId.startsWith(IdPrefix.OAuthClient)) {
       const { spaceIds: spaceIdsByOAuth, baseIds: baseIdsByOAuth } =
         await this.getOAuthAccessBy(userId);
       return {
@@ -100,11 +105,14 @@ export class PermissionService {
     };
   }
 
-  async getUpperIdByTableId(tableId: string): Promise<{ spaceId: string; baseId: string }> {
-    const table = await this.prismaService.tableMeta.findFirst({
+  async getUpperIdByTableId(
+    tableId: string,
+    includeInactiveResource?: boolean
+  ): Promise<{ spaceId: string; baseId: string }> {
+    const table = await this.prismaService.txClient().tableMeta.findFirst({
       where: {
         id: tableId,
-        deletedTime: null,
+        ...(includeInactiveResource ? {} : { deletedTime: null }),
       },
       select: {
         base: true,
@@ -118,11 +126,14 @@ export class PermissionService {
     return { baseId, spaceId };
   }
 
-  async getUpperIdByBaseId(baseId: string): Promise<{ spaceId: string }> {
+  async getUpperIdByBaseId(
+    baseId: string,
+    includeInactiveResource?: boolean
+  ): Promise<{ spaceId: string }> {
     const base = await this.prismaService.base.findFirst({
       where: {
         id: baseId,
-        deletedTime: null,
+        ...(includeInactiveResource ? {} : { deletedTime: null }),
       },
       select: {
         spaceId: true,
@@ -137,22 +148,28 @@ export class PermissionService {
   private async isBaseIdAllowedForResource(
     baseId: string,
     spaceIds: string[] | undefined,
-    baseIds: string[] | undefined
+    baseIds: string[] | undefined,
+    includeInactiveResource?: boolean
   ) {
-    const upperId = await this.getUpperIdByBaseId(baseId);
+    const upperId = await this.getUpperIdByBaseId(baseId, includeInactiveResource);
     return spaceIds?.includes(upperId.spaceId) || baseIds?.includes(baseId);
   }
 
   private async isTableIdAllowedForResource(
     tableId: string,
     spaceIds: string[] | undefined,
-    baseIds: string[] | undefined
+    baseIds: string[] | undefined,
+    includeInactiveResource?: boolean
   ) {
-    const { spaceId, baseId } = await this.getUpperIdByTableId(tableId);
+    const { spaceId, baseId } = await this.getUpperIdByTableId(tableId, includeInactiveResource);
     return spaceIds?.includes(spaceId) || baseIds?.includes(baseId);
   }
 
-  async getPermissionsByAccessToken(resourceId: string, accessTokenId: string) {
+  async getPermissionsByAccessToken(
+    resourceId: string,
+    accessTokenId: string,
+    includeInactiveResource?: boolean
+  ) {
     const { scopes, spaceIds, baseIds } = await this.getAccessToken(accessTokenId);
 
     if (
@@ -169,14 +186,24 @@ export class PermissionService {
 
     if (
       resourceId.startsWith(IdPrefix.Base) &&
-      !(await this.isBaseIdAllowedForResource(resourceId, spaceIds, baseIds))
+      !(await this.isBaseIdAllowedForResource(
+        resourceId,
+        spaceIds,
+        baseIds,
+        includeInactiveResource
+      ))
     ) {
       throw new ForbiddenException(`not allowed to base ${resourceId}`);
     }
 
     if (
       resourceId.startsWith(IdPrefix.Table) &&
-      !(await this.isTableIdAllowedForResource(resourceId, spaceIds, baseIds))
+      !(await this.isTableIdAllowedForResource(
+        resourceId,
+        spaceIds,
+        baseIds,
+        includeInactiveResource
+      ))
     ) {
       throw new ForbiddenException(`not allowed to table ${resourceId}`);
     }
@@ -186,41 +213,59 @@ export class PermissionService {
 
   private async getPermissionBySpaceId(spaceId: string) {
     const role = await this.getRoleBySpaceId(spaceId);
-    return getPermissions(RoleType.Space, role);
-  }
-
-  private async getPermissionByBaseId(baseId: string) {
-    const role = await this.getRoleByBaseId(baseId);
-    if (role) {
-      return getPermissions(RoleType.Base, role);
+    if (!role) {
+      throw new ForbiddenException(`you have no permission to access this space`);
     }
-    return this.getPermissionBySpaceId((await this.getUpperIdByBaseId(baseId)).spaceId);
+    return getPermissions(role);
   }
 
-  private async getPermissionByTableId(tableId: string) {
-    const baseId = (await this.getUpperIdByTableId(tableId)).baseId;
-    return this.getPermissionByBaseId(baseId);
+  private async getPermissionByBaseId(baseId: string, includeInactiveResource?: boolean) {
+    const role = await this.getRoleByBaseId(baseId);
+    const spaceRole = await this.getRoleBySpaceId(
+      (await this.getUpperIdByBaseId(baseId, includeInactiveResource)).spaceId
+    );
+    if (!role && !spaceRole) {
+      throw new ForbiddenException(`you have no permission to access this base`);
+    }
+    const basePermissions = role ? getPermissions(role) : [];
+    const spacePermissions = spaceRole ? getPermissions(spaceRole) : [];
+    // In the presence of an organization, a user can have concurrent permissions at both space and base levels,
+    // requiring a merge operation to determine the highest applicable permission level
+    return union(basePermissions, spacePermissions);
   }
 
-  async getPermissionsByResourceId(resourceId: string) {
+  private async getPermissionByTableId(tableId: string, includeInactiveResource?: boolean) {
+    const baseId = (await this.getUpperIdByTableId(tableId, includeInactiveResource)).baseId;
+    return this.getPermissionByBaseId(baseId, includeInactiveResource);
+  }
+
+  async getPermissionsByResourceId(resourceId: string, includeInactiveResource?: boolean) {
     if (resourceId.startsWith(IdPrefix.Space)) {
       return await this.getPermissionBySpaceId(resourceId);
     } else if (resourceId.startsWith(IdPrefix.Base)) {
-      return await this.getPermissionByBaseId(resourceId);
+      return await this.getPermissionByBaseId(resourceId, includeInactiveResource);
     } else if (resourceId.startsWith(IdPrefix.Table)) {
-      return await this.getPermissionByTableId(resourceId);
+      return await this.getPermissionByTableId(resourceId, includeInactiveResource);
     } else {
       throw new ForbiddenException('request path is not valid');
     }
   }
 
-  async getPermissions(resourceId: string, accessTokenId?: string) {
-    const userPermissions = await this.getPermissionsByResourceId(resourceId);
+  async getPermissions(
+    resourceId: string,
+    accessTokenId?: string,
+    includeInactiveResource?: boolean
+  ) {
+    const userPermissions = await this.getPermissionsByResourceId(
+      resourceId,
+      includeInactiveResource
+    );
 
     if (accessTokenId) {
       const accessTokenPermission = await this.getPermissionsByAccessToken(
         resourceId,
-        accessTokenId
+        accessTokenId,
+        includeInactiveResource
       );
       return intersection(userPermissions, accessTokenPermission);
     }
@@ -229,10 +274,15 @@ export class PermissionService {
 
   async validPermissions(
     resourceId: string,
-    permissions: PermissionAction[],
-    accessTokenId?: string
+    permissions: Action[],
+    accessTokenId?: string,
+    includeInactiveResource?: boolean
   ) {
-    const ownPermissions = await this.getPermissions(resourceId, accessTokenId);
+    const ownPermissions = await this.getPermissions(
+      resourceId,
+      accessTokenId,
+      includeInactiveResource
+    );
     if (permissions.every((permission) => ownPermissions.includes(permission))) {
       return ownPermissions;
     }

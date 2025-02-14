@@ -27,14 +27,29 @@ export enum Events {
   TABLE_VIEW_DELETE = 'table.view.delete',
   TABLE_VIEW_UPDATE = 'table.view.update',
 
+  OPERATION_RECORDS_CREATE = 'operation.records.create',
+  OPERATION_RECORDS_DELETE = 'operation.records.delete',
+  OPERATION_RECORDS_UPDATE = 'operation.records.update',
+  OPERATION_RECORDS_ORDER_UPDATE = 'operation.records.order.update',
+  OPERATION_FIELDS_CREATE = 'operation.fields.create',
+  OPERATION_FIELDS_DELETE = 'operation.fields.delete',
+  OPERATION_FIELD_CONVERT = 'operation.field.convert',
+  OPERATION_PASTE_SELECTION = 'operation.paste.selection',
+  OPERATION_VIEW_DELETE = 'operation.view.delete',
+  OPERATION_VIEW_CREATE = 'operation.view.create',
+  OPERATION_VIEW_UPDATE = 'operation.view.update',
+  OPERATION_PUSH = 'operation.push',
+
+  TABLE_USER_RENAME_COMPLETE = 'table.user.rename.complete',
+
   SHARED_VIEW_CREATE = 'shared.view.create',
   SHARED_VIEW_DELETE = 'shared.view.delete',
   SHARED_VIEW_UPDATE = 'shared.view.update',
 
   USER_SIGNIN = 'user.signin',
   USER_SIGNUP = 'user.signup',
+  USER_RENAME = 'user.rename',
   USER_SIGNOUT = 'user.signout',
-  USER_UPDATE = 'user.update',
   USER_DELETE = 'user.delete',
 
   // USER_PASSWORD_RESET = 'user.password.reset',
@@ -46,4 +61,9 @@ export enum Events {
 
   WORKFLOW_ACTIVATE = 'workflow.activate',
   WORKFLOW_DEACTIVATE = 'workflow.deactivate',
+
+  CROP_IMAGE = 'crop.image',
+  CROP_IMAGE_COMPLETE = 'crop.image.complete',
+
+  RECORD_HISTORY_CREATE = 'record.history.create',
 }

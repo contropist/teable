@@ -32,6 +32,7 @@ import {
   literalValueListSchema,
 } from '@teable/core';
 import type { Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
 import type { Knex } from 'knex';
 import type { IFieldInstance } from '../../features/field/model/factory';
 import type { ICellValueFilterInterface } from './cell-value-filter.interface';
@@ -39,13 +40,10 @@ import type { ICellValueFilterInterface } from './cell-value-filter.interface';
 export abstract class AbstractCellValueFilter implements ICellValueFilterInterface {
   protected tableColumnRef: string;
 
-  constructor(
-    protected readonly dbTableName: string,
-    protected readonly field: IFieldInstance
-  ) {
+  constructor(protected readonly field: IFieldInstance) {
     const { dbFieldName } = this.field;
 
-    this.tableColumnRef = `${this.dbTableName}.${dbFieldName}`;
+    this.tableColumnRef = dbFieldName;
   }
 
   compiler(builderClient: Knex.QueryBuilder, operator: IFilterOperator, value: IFilterValue) {
@@ -295,6 +293,30 @@ export abstract class AbstractCellValueFilter implements ICellValueFilterInterfa
       return [startDate, endDate];
     };
 
+    const generateRelativeDateFromCurrentDateRange = (
+      mode: 'current' | 'next' | 'last',
+      unit: 'week' | 'month' | 'year'
+    ): [Dayjs, Dayjs] => {
+      dayjs.locale(dayjs.locale(), {
+        weekStart: 1,
+      });
+      let cursorDate;
+      switch (mode) {
+        case 'current':
+          cursorDate = dateUtil.date();
+          break;
+        case 'next':
+          cursorDate = dateUtil.date().add(1, unit);
+          break;
+        case 'last':
+          cursorDate = dateUtil.date().subtract(1, unit);
+          break;
+        default:
+          cursorDate = dateUtil.date();
+      }
+      return [cursorDate.startOf(unit).startOf('day'), cursorDate.endOf(unit).endOf('day')];
+    };
+
     // Map of operation functions based on date mode.
     const operationMap: Record<string, () => [Dayjs, Dayjs]> = {
       today: () => computeDateRangeForFixedDays('date'),
@@ -307,6 +329,15 @@ export abstract class AbstractCellValueFilter implements ICellValueFilterInterfa
       daysAgo: () => calculateDateRangeForOffsetDays(true),
       daysFromNow: () => calculateDateRangeForOffsetDays(false),
       exactDate: () => determineDateRangeForExactDate(),
+      currentWeek: () => generateRelativeDateFromCurrentDateRange('current', 'week'),
+      currentMonth: () => generateRelativeDateFromCurrentDateRange('current', 'month'),
+      currentYear: () => generateRelativeDateFromCurrentDateRange('current', 'year'),
+      lastWeek: () => generateRelativeDateFromCurrentDateRange('last', 'week'),
+      lastMonth: () => generateRelativeDateFromCurrentDateRange('last', 'month'),
+      lastYear: () => generateRelativeDateFromCurrentDateRange('last', 'year'),
+      nextWeekPeriod: () => generateRelativeDateFromCurrentDateRange('next', 'week'),
+      nextMonthPeriod: () => generateRelativeDateFromCurrentDateRange('next', 'month'),
+      nextYearPeriod: () => generateRelativeDateFromCurrentDateRange('next', 'year'),
       pastWeek: () => generateOffsetDateRange(true, 'week', 1),
       pastMonth: () => generateOffsetDateRange(true, 'month', 1),
       pastYear: () => generateOffsetDateRange(true, 'year', 1),

@@ -1,13 +1,15 @@
 import type { IFieldVo, DbFieldType, CellValueType } from '@teable/core';
 import { assertNever, FieldType } from '@teable/core';
 import type { Field } from '@teable/db-main-prisma';
-import { plainToInstance } from 'class-transformer';
+import { instanceToPlain, plainToInstance } from 'class-transformer';
 import { AttachmentFieldDto } from './field-dto/attachment-field.dto';
 import { AutoNumberFieldDto } from './field-dto/auto-number-field.dto';
 import { CheckboxFieldDto } from './field-dto/checkbox-field.dto';
+import { CreatedByFieldDto } from './field-dto/created-by-field.dto';
 import { CreatedTimeFieldDto } from './field-dto/created-time-field.dto';
 import { DateFieldDto } from './field-dto/date-field.dto';
 import { FormulaFieldDto } from './field-dto/formula-field.dto';
+import { LastModifiedByFieldDto } from './field-dto/last-modified-by-field.dto';
 import { LastModifiedTimeFieldDto } from './field-dto/last-modified-time-field.dto';
 import { LinkFieldDto } from './field-dto/link-field.dto';
 import { LongTextFieldDto } from './field-dto/long-text-field.dto';
@@ -80,9 +82,11 @@ export function createFieldInstanceByVo(field: IFieldVo) {
       return plainToInstance(LastModifiedTimeFieldDto, field);
     case FieldType.User:
       return plainToInstance(UserFieldDto, field);
-    case FieldType.Button:
     case FieldType.CreatedBy:
+      return plainToInstance(CreatedByFieldDto, field);
     case FieldType.LastModifiedBy:
+      return plainToInstance(LastModifiedByFieldDto, field);
+    case FieldType.Button:
     case FieldType.Count:
     case FieldType.Duration:
       throw new Error('did not implement yet');
@@ -95,4 +99,8 @@ export type IFieldInstance = ReturnType<typeof createFieldInstanceByVo>;
 
 export interface IFieldMap {
   [fieldId: string]: IFieldInstance;
+}
+
+export function convertFieldInstanceToFieldVo(fieldInstance: IFieldInstance): IFieldVo {
+  return instanceToPlain(fieldInstance, { excludePrefixes: ['_'] }) as IFieldVo;
 }

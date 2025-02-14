@@ -1,7 +1,7 @@
 import type { IAttachmentCellValue } from '@teable/core';
 import { AttachmentFieldCore } from '@teable/core';
 import type { ICopyVo, IPasteRo } from '@teable/openapi';
-import { RangeType } from '@teable/openapi';
+import { RangeType, UploadType } from '@teable/openapi';
 import type { CombinedSelection, IRecordIndexMap } from '@teable/sdk/components';
 import { SelectionRegionType } from '@teable/sdk/components';
 import type { Field } from '@teable/sdk/model';
@@ -25,10 +25,9 @@ export const rangeTypes = {
 export const isSafari = () => /^(?:(?!chrome|android).)*safari/i.test(navigator.userAgent);
 
 export const copyHandler = async (getCopyData: () => Promise<ICopyVo>) => {
-  const { header, content } = await getCopyData();
-
   // Can't await asynchronous action before navigator.clipboard.write in safari
   if (!isSafari()) {
+    const { header, content } = await getCopyData();
     await navigator.clipboard.write([
       new ClipboardItem({
         [ClipboardTypes.text]: new Blob([content], { type: ClipboardTypes.text }),
@@ -41,10 +40,13 @@ export const copyHandler = async (getCopyData: () => Promise<ICopyVo>) => {
   }
 
   const getText = async () => {
+    const { content } = await getCopyData();
+
     return new Blob([content], { type: ClipboardTypes.text });
   };
 
   const getHtml = async () => {
+    const { header, content } = await getCopyData();
     return new Blob([serializerHtml(content, header)], { type: ClipboardTypes.html });
   };
 
@@ -61,12 +63,14 @@ export const filePasteHandler = async ({
   fields,
   recordMap,
   selection,
+  baseId,
   requestPaste,
 }: {
   selection: CombinedSelection;
   recordMap: IRecordIndexMap;
   fields: Field[];
   files: FileList;
+  baseId?: string;
   requestPaste: (
     content: string,
     type: RangeType | undefined,
@@ -74,13 +78,12 @@ export const filePasteHandler = async ({
   ) => Promise<unknown>;
 }) => {
   const selectionCell = getSelectionCell(selection);
-  const attachments = await uploadFiles(files);
+  const attachments = await uploadFiles(files, UploadType.Table, baseId);
 
   if (selectionCell) {
     const [fieldIndex, recordIndex] = selectionCell;
     const record = recordMap[recordIndex];
     const field = fields[fieldIndex];
-    console.log('selectionCell', selectionCell, record);
     const oldCellValue = (record.getCellValue(field.id) as IAttachmentCellValue) || [];
     await record.updateCell(field.id, [...oldCellValue, ...attachments]);
   } else {
@@ -94,6 +97,7 @@ export const filePasteHandler = async ({
 };
 
 export const textPasteHandler = async (
+  e: React.ClipboardEvent,
   selection: CombinedSelection,
   requestPaste: (
     content: string,
@@ -102,14 +106,11 @@ export const textPasteHandler = async (
     header: IPasteRo['header']
   ) => Promise<void>
 ) => {
-  const clipboardContent = await navigator.clipboard.read();
-  const hasHtml = clipboardContent[0].types.includes(ClipboardTypes.html);
-  const text = clipboardContent[0].types.includes(ClipboardTypes.text)
-    ? await (await clipboardContent[0].getType(ClipboardTypes.text)).text()
+  const hasHtml = e.clipboardData.types.includes(ClipboardTypes.html);
+  const text = e.clipboardData.types.includes(ClipboardTypes.text)
+    ? e.clipboardData.getData(ClipboardTypes.text)
     : '';
-  const html = hasHtml
-    ? await (await clipboardContent[0].getType(ClipboardTypes.html)).text()
-    : undefined;
+  const html = hasHtml ? e.clipboardData.getData(ClipboardTypes.html) : undefined;
   const header = extractTableHeader(html);
 
   if (header.error) {

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { SpaceRole } from '@teable/core';
+import { Role } from '@teable/core';
 import {
   PinType,
   deleteSpace,
@@ -66,6 +66,7 @@ export const SpaceInnerPage: React.FC = () => {
     mutationFn: updateSpace,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ReactQueryKeys.spaceList() });
+      queryClient.invalidateQueries({ queryKey: ReactQueryKeys.space(spaceId) });
     },
   });
 
@@ -112,8 +113,12 @@ export const SpaceInnerPage: React.FC = () => {
                 level={subscriptionSummary?.level}
                 status={subscriptionSummary?.status}
                 spaceId={space.id}
-                withUpgrade={space.role === SpaceRole.Owner}
+                withUpgrade={space.role === Role.Owner}
+                organization={space.organization}
               />
+            )}
+            {!isCloud && space.organization && (
+              <div className="text-sm text-gray-500">{space.organization.name}</div>
             )}
           </div>
 

@@ -25,7 +25,7 @@ import {
   createField,
   createTable,
   deleteField,
-  deleteTable,
+  permanentDeleteTable,
   getFields,
   getRecord,
   initApp,
@@ -55,13 +55,29 @@ describe('OpenAPI FieldController (e2e)', () => {
     });
 
     afterAll(async () => {
-      await deleteTable(baseId, table1.id);
+      await permanentDeleteTable(baseId, table1.id);
     });
 
     it('/api/table/{tableId}/field (GET)', async () => {
       const fields: IFieldVo[] = await getFields(table1.id);
 
       expect(fields).toHaveLength(3);
+    });
+
+    it('/api/table/{tableId}/field (GET) with projection', async () => {
+      const firstFieldId = table1.fields[0].id;
+      const firstViewId = table1.views[0].id;
+
+      const fields: IFieldVo[] = await getFields(table1.id, undefined, undefined, [firstFieldId]);
+      const viewFields: IFieldVo[] = await getFields(table1.id, firstViewId, undefined, [
+        firstFieldId,
+      ]);
+
+      expect(fields).toHaveLength(1);
+      expect(fields[0].id).toEqual(firstFieldId);
+
+      expect(viewFields).toHaveLength(1);
+      expect(viewFields[0].id).toEqual(firstFieldId);
     });
 
     it('/api/table/{tableId}/field (POST)', async () => {
@@ -96,8 +112,8 @@ describe('OpenAPI FieldController (e2e)', () => {
     });
 
     afterAll(async () => {
-      await deleteTable(baseId, table1.id);
-      await deleteTable(baseId, table2.id);
+      await permanentDeleteTable(baseId, table1.id);
+      await permanentDeleteTable(baseId, table2.id);
     });
 
     async function createFieldByType(
@@ -244,8 +260,8 @@ describe('OpenAPI FieldController (e2e)', () => {
     });
 
     afterAll(async () => {
-      await deleteTable(baseId, table1.id);
-      await deleteTable(baseId, table2.id);
+      await permanentDeleteTable(baseId, table1.id);
+      await permanentDeleteTable(baseId, table2.id);
     });
 
     async function createFieldWithUnique(
@@ -430,8 +446,8 @@ describe('OpenAPI FieldController (e2e)', () => {
     });
 
     afterAll(async () => {
-      await deleteTable(baseId, table1.id);
-      await deleteTable(baseId, table2.id);
+      await permanentDeleteTable(baseId, table1.id);
+      await permanentDeleteTable(baseId, table2.id);
     });
 
     let prisma: PrismaService;

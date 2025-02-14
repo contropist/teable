@@ -17,8 +17,7 @@ import {
   defaultUserFieldOptions,
   getPermissions,
   nullsToUndefined,
-  SpaceRole,
-  RoleType,
+  Role,
   DateFormattingPreset,
   TimeFormatting,
 } from '@teable/core';
@@ -148,7 +147,7 @@ describe('selectionService', () => {
         {
           user: {} as any,
           tx: {},
-          permissions: getPermissions(RoleType.Space, SpaceRole.Owner),
+          permissions: getPermissions(Role.Owner),
         },
         async () => selectionService['calculateExpansion'](tableSize, cell, tableDataSize)
       );
@@ -159,7 +158,7 @@ describe('selectionService', () => {
         {
           user: {} as any,
           tx: {},
-          permissions: getPermissions(RoleType.Space, SpaceRole.Editor),
+          permissions: getPermissions(Role.Editor),
         },
         async () => selectionService['calculateExpansion'](tableSize, cell, tableDataSize)
       );
@@ -520,9 +519,9 @@ describe('selectionService', () => {
 
       vi.spyOn(selectionService as any, 'expandColumns').mockResolvedValue(mockNewFields);
 
-      vi.spyOn(recordOpenApiService, 'updateRecords').mockResolvedValue(null as any);
+      vi.spyOn(recordOpenApiService, 'updateRecords').mockResolvedValue({} as any);
 
-      vi.spyOn(recordOpenApiService, 'createRecords').mockResolvedValue(null as any);
+      vi.spyOn(recordOpenApiService, 'createRecords').mockResolvedValue({ records: [] } as any);
 
       prismaService.$tx.mockImplementation(async (fn, _options) => {
         return await fn(prismaService);
@@ -533,7 +532,7 @@ describe('selectionService', () => {
         {
           user: {} as any,
           tx: {},
-          permissions: getPermissions(RoleType.Space, SpaceRole.Owner),
+          permissions: getPermissions(Role.Owner),
         },
         async () => await selectionService.paste(tableId, { viewId, ...pasteRo })
       );
@@ -613,7 +612,11 @@ describe('selectionService', () => {
         ranges: clearRo.ranges,
       });
       expect(selectionService['fillCells']).toHaveBeenCalledWith(records, [{ fields: {} }]);
-      expect(recordOpenApiService.updateRecords).toHaveBeenCalledWith(tableId, updateRecordsRo);
+      expect(recordOpenApiService.updateRecords).toHaveBeenCalledWith(
+        tableId,
+        updateRecordsRo,
+        undefined
+      );
     });
   });
 

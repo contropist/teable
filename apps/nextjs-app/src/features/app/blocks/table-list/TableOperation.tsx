@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query';
 import {
   MoreHorizontal,
   Pencil,
@@ -9,6 +10,7 @@ import {
   FileExcel,
 } from '@teable/icons';
 import { SUPPORTEDTYPE } from '@teable/openapi';
+import { ReactQueryKeys } from '@teable/sdk/config';
 import { useBase, useTables } from '@teable/sdk/hooks';
 import type { Table } from '@teable/sdk/model';
 import { ConfirmDialog } from '@teable/ui-lib/base';
@@ -25,40 +27,49 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { useTranslation } from 'next-i18next';
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState } from 'react';
 import { tableConfig } from '@/features/i18n/table.config';
+import { useDownload } from '../../hooks/useDownLoad';
 import { TableImport } from '../import-table';
 
 interface ITableOperationProps {
   className?: string;
   table: Table;
   onRename?: () => void;
+  open?: boolean;
+  setOpen?: (open: boolean) => void;
 }
 
 export const TableOperation = (props: ITableOperationProps) => {
-  const { table, className, onRename } = props;
+  const { table, className, onRename, open, setOpen } = props;
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [importVisible, setImportVisible] = useState(false);
   const [importType, setImportType] = useState(SUPPORTEDTYPE.CSV);
   const base = useBase();
   const tables = useTables();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { baseId, tableId: routerTableId } = router.query;
   const { t } = useTranslation(tableConfig.i18nNamespaces);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const { trigger } = useDownload({ downloadUrl: `/api/export/${table.id}`, key: 'table' });
 
   const menuPermission = useMemo(() => {
     return {
       deleteTable: table.permission?.['table|delete'],
+      updateTable: table.permission?.['table|update'],
+      exportTable: table.permission?.['table|export'],
+      importTable: table.permission?.['table|import'],
     };
   }, [table.permission]);
 
   const deleteTable = async () => {
     const tableId = table?.id;
-    if (!tableId) {
-      return;
-    }
+
+    if (!tableId) return;
+
     await base.deleteTable(tableId);
+    queryClient.invalidateQueries(ReactQueryKeys.getTrashItems(baseId as string));
+
     const firstTableId = tables.find((t) => t.id !== tableId)?.id;
     if (routerTableId === tableId) {
       router.push(
@@ -82,87 +93,83 @@ export const TableOperation = (props: ITableOperationProps) => {
   return (
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions
     <div onMouseDown={(e) => e.stopPropagation()}>
-      {menuPermission.deleteTable && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <div>
-              <MoreHorizontal className={className} />
-            </div>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            className="min-w-[160px]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {table.permission?.['table|update'] && (
-              <DropdownMenuItem onClick={() => onRename?.()}>
-                <Pencil className="mr-2" />
-                {t('table:table.rename')}
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem asChild>
-              <Link
-                href={{
-                  pathname: '/base/[baseId]/[tableId]/design',
-                  query: { baseId, tableId: table.id },
-                }}
-                title={t('table:table.design')}
-              >
-                <Settings className="mr-2" />
-                {t('table:table.design')}
-              </Link>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <div>
+            <MoreHorizontal className={className} />
+          </div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="min-w-[160px]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {menuPermission.updateTable && (
+            <DropdownMenuItem onClick={() => onRename?.()}>
+              <Pencil className="mr-2" />
+              {t('table:table.rename')}
             </DropdownMenuItem>
-            {table.permission?.['table|export'] && (
-              <DropdownMenuItem
-                onClick={() => {
-                  if (iframeRef.current) {
-                    iframeRef.current.src = `/api/export/${table.id}`;
-                  }
-                }}
-              >
-                <Export className="mr-2" />
-                {t('table:import.menu.downAsCsv')}
-              </DropdownMenuItem>
-            )}
-            {table.permission?.['table|import'] && (
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <Import className="mr-2" />
-                  <span>{t('table:import.menu.importData')}</span>
-                </DropdownMenuSubTrigger>
-                <DropdownMenuPortal>
-                  <DropdownMenuSubContent>
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setImportVisible(true);
-                        setImportType(SUPPORTEDTYPE.CSV);
-                      }}
-                    >
-                      <FileCsv className="mr-2 size-4" />
-                      <span>{t('table:import.menu.csvFile')}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setImportVisible(true);
-                        setImportType(SUPPORTEDTYPE.EXCEL);
-                      }}
-                    >
-                      <FileExcel className="mr-2 size-4" />
-                      <span>{t('table:import.menu.excelFile')}</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuSubContent>
-                </DropdownMenuPortal>
-              </DropdownMenuSub>
-            )}
-            {table.permission?.['table|delete'] && (
-              <DropdownMenuItem className="text-destructive" onClick={() => setDeleteConfirm(true)}>
-                <Trash2 className="mr-2" />
-                {t('common:actions.delete')}
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+          )}
+          <DropdownMenuItem asChild>
+            <Link
+              href={{
+                pathname: '/base/[baseId]/design',
+                query: { baseId, tableId: table.id },
+              }}
+              title={t('table:table.design')}
+            >
+              <Settings className="mr-2" />
+              {t('table:table.design')}
+            </Link>
+          </DropdownMenuItem>
+          {menuPermission.exportTable && (
+            <DropdownMenuItem
+              onClick={() => {
+                trigger?.();
+              }}
+            >
+              <Export className="mr-2" />
+              {t('table:import.menu.downAsCsv')}
+            </DropdownMenuItem>
+          )}
+          {menuPermission.importTable && (
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Import className="mr-2" />
+                <span>{t('table:import.menu.importData')}</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuPortal>
+                <DropdownMenuSubContent>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setImportVisible(true);
+                      setImportType(SUPPORTEDTYPE.CSV);
+                    }}
+                  >
+                    <FileCsv className="mr-2 size-4" />
+                    <span>{t('table:import.menu.csvFile')}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setImportVisible(true);
+                      setImportType(SUPPORTEDTYPE.EXCEL);
+                    }}
+                  >
+                    <FileExcel className="mr-2 size-4" />
+                    <span>{t('table:import.menu.excelFile')}</span>
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuPortal>
+            </DropdownMenuSub>
+          )}
+          {menuPermission.deleteTable && (
+            <DropdownMenuItem className="text-destructive" onClick={() => setDeleteConfirm(true)}>
+              <Trash2 className="mr-2" />
+              {t('common:actions.delete')}
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       {importVisible && (
         <TableImport
@@ -188,7 +195,6 @@ export const TableOperation = (props: ITableOperationProps) => {
         onCancel={() => setDeleteConfirm(false)}
         onConfirm={deleteTable}
       />
-      <iframe ref={iframeRef} title="This for export csv download" style={{ display: 'none' }} />
     </div>
   );
 };

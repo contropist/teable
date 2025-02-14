@@ -1,5 +1,4 @@
 import colors from 'tailwindcss/colors';
-import { ThemeKey } from '../../../context';
 import { hexToRGBA } from '../utils';
 
 export interface IGridTheme {
@@ -41,6 +40,7 @@ export interface IGridTheme {
   columnHeaderNameColor: string;
   columnResizeHandlerBg: string;
   columnDraggingPlaceholderBg: string;
+  columnStatisticBgHovered: string;
   rowHeaderTextColor: string;
   appendRowBg: string;
   appendRowBgHovered: string;
@@ -49,10 +49,14 @@ export interface IGridTheme {
   avatarSizeXS: number;
   avatarSizeSM: number;
   avatarSizeMD: number;
-  themeKey: ThemeKey;
+  themeKey: string;
   scrollBarBg: string;
   interactionLineColorCommon: string;
   interactionLineColorHighlight: string;
+  searchCursorBg: string;
+  searchTargetIndexBg: string;
+  commentCountBg: string;
+  commentCountTextColor: string;
 }
 
 export const gridTheme: IGridTheme = {
@@ -103,6 +107,9 @@ export const gridTheme: IGridTheme = {
   columnResizeHandlerBg: colors.slate[400],
   columnDraggingPlaceholderBg: hexToRGBA(colors.black, 0.2),
 
+  // Column Statistic
+  columnStatisticBgHovered: colors.gray[200],
+
   // Row Header
   rowHeaderTextColor: colors.gray[500],
 
@@ -117,7 +124,7 @@ export const gridTheme: IGridTheme = {
   avatarSizeSM: 20,
   avatarSizeMD: 24,
 
-  themeKey: ThemeKey.Light,
+  themeKey: 'light',
 
   // ScrollBar
   scrollBarBg: colors.gray[400],
@@ -125,4 +132,12 @@ export const gridTheme: IGridTheme = {
   // interaction
   interactionLineColorCommon: colors.slate[300],
   interactionLineColorHighlight: colors.violet[500],
+
+  // search cursor
+  searchCursorBg: colors.amber[400],
+  searchTargetIndexBg: colors.yellow[200],
+
+  // comment
+  commentCountBg: colors.orange[400],
+  commentCountTextColor: colors.white,
 };

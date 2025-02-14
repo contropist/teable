@@ -1,19 +1,19 @@
 import https from 'https';
 import { join } from 'path';
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import {
   generateAccountId,
   generateSpaceId,
   generateUserId,
   minidenticon,
-  SpaceRole,
+  Role,
 } from '@teable/core';
 import type { Prisma } from '@teable/db-main-prisma';
 import { PrismaService } from '@teable/db-main-prisma';
-import { type ICreateSpaceRo, type IUserNotifyMeta, UploadType } from '@teable/openapi';
+import { CollaboratorType, PrincipalType, UploadType } from '@teable/openapi';
+import type { IUserInfoVo, ICreateSpaceRo, IUserNotifyMeta } from '@teable/openapi';
 import { ClsService } from 'nestjs-cls';
 import sharp from 'sharp';
-import { BaseConfig, IBaseConfig } from '../../configs/base.config';
 import { EventEmitterService } from '../../event-emitter/event-emitter.service';
 import { Events } from '../../event-emitter/events';
 import { UserSignUpEvent } from '../../event-emitter/events/user/user.event';
@@ -28,8 +28,7 @@ export class UserService {
     private readonly prismaService: PrismaService,
     private readonly cls: ClsService<IClsStore>,
     private readonly eventEmitterService: EventEmitterService,
-    @InjectStorageAdapter() readonly storageAdapter: StorageAdapter,
-    @BaseConfig() private readonly baseConfig: IBaseConfig
+    @InjectStorageAdapter() readonly storageAdapter: StorageAdapter
   ) {}
 
   async getUserById(id: string) {
@@ -72,9 +71,11 @@ export class UserService {
     });
     await this.prismaService.txClient().collaborator.create({
       data: {
-        spaceId: space.id,
-        roleName: SpaceRole.Owner,
-        userId,
+        resourceId: space.id,
+        resourceType: CollaboratorType.Space,
+        roleName: Role.Owner,
+        principalType: PrincipalType.User,
+        principalId: userId,
         createdBy: userId,
       },
     });
@@ -116,9 +117,11 @@ export class UserService {
       notifyMeta: JSON.stringify(defaultNotifyMeta),
     };
 
-    const userTotalCount = await this.prismaService.txClient().user.count();
+    const userTotalCount = await this.prismaService.txClient().user.count({
+      where: { isSystem: null },
+    });
 
-    const isAdmin = !this.baseConfig.isCloud && userTotalCount === 0;
+    const isAdmin = userTotalCount === 0;
 
     if (!user?.avatar) {
       const avatar = await this.generateDefaultAvatar(user.id!);
@@ -145,17 +148,23 @@ export class UserService {
       this.cls.set('user.id', id);
       await this.createSpaceBySignup({ name: defaultSpaceName || `${name}'s space` });
     });
-    this.eventEmitterService.emitAsync(Events.USER_SIGNUP, new UserSignUpEvent(id));
     return newUser;
   }
 
   async updateUserName(id: string, name: string) {
-    await this.prismaService.txClient().user.update({
+    const user: IUserInfoVo = await this.prismaService.txClient().user.update({
       data: {
         name,
       },
       where: { id, deletedTime: null },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        avatar: true,
+      },
     });
+    this.eventEmitterService.emitAsync(Events.USER_RENAME, user);
   }
 
   async updateAvatar(id: string, avatarFile: { path: string; mimetype: string; size: number }) {
@@ -278,7 +287,7 @@ export class UserService {
     type: string;
     avatarUrl?: string;
   }) {
-    return this.prismaService.$tx(async () => {
+    const res = await this.prismaService.$tx(async () => {
       const { email, name, provider, providerId, type, avatarUrl } = user;
       // account exist check
       const existAccount = await this.prismaService.txClient().account.findFirst({
@@ -290,6 +299,9 @@ export class UserService {
 
       // user exist check
       const existUser = await this.getUserByEmail(email);
+      if (existUser && existUser.isSystem) {
+        throw new UnauthorizedException('User is system user');
+      }
       if (!existUser) {
         const userId = generateUserId();
         let avatar: string | undefined = undefined;
@@ -307,12 +319,64 @@ export class UserService {
       });
       return existUser;
     });
+    if (res) {
+      this.eventEmitterService.emitAsync(Events.USER_SIGNUP, new UserSignUpEvent(res.id));
+    }
+    return res;
   }
 
   async refreshLastSignTime(userId: string) {
     await this.prismaService.txClient().user.update({
       where: { id: userId, deletedTime: null },
       data: { lastSignTime: new Date().toISOString() },
+    });
+  }
+
+  async getUserInfoList(userIds: string[]) {
+    const userList = await this.prismaService.user.findMany({
+      where: {
+        id: { in: userIds },
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        avatar: true,
+      },
+    });
+    return userList.map((user) => {
+      const { avatar } = user;
+      return {
+        ...user,
+        avatar: avatar && getFullStorageUrl(StorageAdapter.getBucket(UploadType.Avatar), avatar),
+      };
+    });
+  }
+
+  async createSystemUser({
+    id = generateUserId(),
+    email,
+    name,
+    avatar,
+  }: {
+    id?: string;
+    email: string;
+    name: string;
+    avatar?: string;
+  }) {
+    return this.prismaService.$tx(async () => {
+      if (!avatar) {
+        avatar = await this.generateDefaultAvatar(id);
+      }
+      return this.prismaService.txClient().user.create({
+        data: {
+          id,
+          email,
+          name,
+          avatar,
+          isSystem: true,
+        },
+      });
     });
   }
 }

@@ -1,17 +1,20 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import type { IMakeOptional, IUserFieldOptions } from '@teable/core';
 import { FieldKeyType, generateRecordId, FieldType } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import type { ICreateRecordsRo, ICreateRecordsVo, IRecord } from '@teable/openapi';
-import { isEmpty, keyBy } from 'lodash';
+import { keyBy, uniq } from 'lodash';
+import { ClsService } from 'nestjs-cls';
+import type { IClsStore } from '../../../types/cls';
 import { BatchService } from '../../calculation/batch.service';
 import { FieldCalculationService } from '../../calculation/field-calculation.service';
 import { LinkService } from '../../calculation/link.service';
-import type { ICellContext } from '../../calculation/link.service';
-import type { IOpsMap } from '../../calculation/reference.service';
 import { ReferenceService } from '../../calculation/reference.service';
-import { SystemFieldService } from '../../calculation/system-field.service';
+import type { ICellContext } from '../../calculation/utils/changes';
 import { formatChangesToOps } from '../../calculation/utils/changes';
+import type { IOpsMap } from '../../calculation/utils/compose-maps';
 import { composeOpMaps } from '../../calculation/utils/compose-maps';
+import type { IRecordInnerRo } from '../record.service';
 import { RecordService } from '../record.service';
 import type { IFieldRaws } from '../type';
 
@@ -24,7 +27,7 @@ export class RecordCalculateService {
     private readonly linkService: LinkService,
     private readonly referenceService: ReferenceService,
     private readonly fieldCalculationService: FieldCalculationService,
-    private readonly systemFieldService: SystemFieldService
+    private readonly clsService: ClsService<IClsStore>
   ) {}
 
   async multipleCreateRecords(
@@ -90,32 +93,17 @@ export class RecordCalculateService {
     return cellContexts;
   }
 
-  private async getRecordUpdateDerivation(
-    tableId: string,
-    opsMapOrigin: IOpsMap,
-    opContexts: ICellContext[]
-  ) {
+  private async calculate(tableId: string, opsMapOrigin: IOpsMap, opContexts: ICellContext[]) {
     const derivate = await this.linkService.getDerivateByLink(tableId, opContexts);
 
     const cellChanges = derivate?.cellChanges || [];
 
     const opsMapByLink = cellChanges.length ? formatChangesToOps(cellChanges) : {};
-    const composedOpsMap = composeOpMaps([opsMapOrigin, opsMapByLink]);
-    const systemFieldOpsMap = await this.systemFieldService.getOpsMapBySystemField(composedOpsMap);
+    const manualOpsMap = composeOpMaps([opsMapOrigin, opsMapByLink]);
 
-    // calculate by origin ops and link derivation
-    const {
-      opsMap: opsMapByCalculation,
-      fieldMap,
-      tableId2DbTableName,
-    } = await this.referenceService.calculateOpsMap(composedOpsMap, derivate?.saveForeignKeyToDb);
+    await this.batchService.updateRecords(manualOpsMap);
 
-    // console.log('opsMapByCalculation', JSON.stringify(opsMapByCalculation, null, 2));
-    return {
-      opsMap: composeOpMaps([opsMapOrigin, opsMapByLink, opsMapByCalculation, systemFieldOpsMap]),
-      fieldMap,
-      tableId2DbTableName,
-    };
+    await this.referenceService.calculateOpsMap(manualOpsMap, derivate?.fkRecordMap);
   }
 
   async calculateDeletedRecord(tableId: string, recordIds: string[]) {
@@ -140,17 +128,7 @@ export class RecordCalculateService {
         })
       );
 
-      // 2. get cell changes by derivation
-      const { opsMap, fieldMap, tableId2DbTableName } = await this.getRecordUpdateDerivation(
-        effectedTableId,
-        opsMapOrigin,
-        cellContexts
-      );
-
-      // 3. save all ops
-      if (!isEmpty(opsMap)) {
-        await this.batchService.updateRecords(opsMap, fieldMap, tableId2DbTableName);
-      }
+      await this.calculate(effectedTableId, opsMapOrigin, cellContexts);
     }
   }
 
@@ -161,7 +139,7 @@ export class RecordCalculateService {
     isNewRecord?: boolean
   ) {
     // 1. generate Op by origin submit
-    const opsContexts = await this.generateCellContexts(
+    const originCellContexts = await this.generateCellContexts(
       tableId,
       fieldKeyType,
       records,
@@ -169,7 +147,7 @@ export class RecordCalculateService {
     );
 
     const opsMapOrigin = formatChangesToOps(
-      opsContexts.map((data) => {
+      originCellContexts.map((data) => {
         return {
           tableId,
           recordId: data.recordId,
@@ -181,18 +159,9 @@ export class RecordCalculateService {
     );
 
     // 2. get cell changes by derivation
-    const { opsMap, fieldMap, tableId2DbTableName } = await this.getRecordUpdateDerivation(
-      tableId,
-      opsMapOrigin,
-      opsContexts
-    );
+    await this.calculate(tableId, opsMapOrigin, originCellContexts);
 
-    // console.log('final:opsMap', JSON.stringify(opsMap, null, 2));
-
-    // 3. save all ops
-    if (!isEmpty(opsMap)) {
-      await this.batchService.updateRecords(opsMap, fieldMap, tableId2DbTableName);
-    }
+    return originCellContexts;
   }
 
   private async appendDefaultValue(
@@ -200,16 +169,17 @@ export class RecordCalculateService {
     fieldKeyType: FieldKeyType,
     fieldRaws: IFieldRaws
   ) {
-    return records.map((record) => {
+    const processedRecords = records.map((record) => {
       const fields: { [fieldIdOrName: string]: unknown } = { ...record.fields };
       for (const fieldRaw of fieldRaws) {
-        const { type, options } = fieldRaw;
-        if (options == null) continue;
-        const { defaultValue } = JSON.parse(options) || {};
+        const { type, options, isComputed } = fieldRaw;
+        if (options == null || isComputed) continue;
+        const optionsObj = JSON.parse(options) || {};
+        const { defaultValue } = optionsObj;
         if (defaultValue == null) continue;
         const fieldIdOrName = fieldRaw[fieldKeyType];
         if (fields[fieldIdOrName] != null) continue;
-        fields[fieldIdOrName] = this.getDefaultValue(type as FieldType, defaultValue);
+        fields[fieldIdOrName] = this.getDefaultValue(type as FieldType, optionsObj, defaultValue);
       }
 
       return {
@@ -217,23 +187,118 @@ export class RecordCalculateService {
         fields,
       };
     });
+
+    // After process to handle user field
+    const userFields = fieldRaws.filter((fieldRaw) => fieldRaw.type === FieldType.User);
+    if (userFields.length > 0) {
+      return await this.fillUserInfo(processedRecords, userFields, fieldKeyType);
+    }
+
+    return processedRecords;
   }
 
-  private getDefaultValue(type: FieldType, defaultValue: unknown) {
-    if (type === FieldType.Date && defaultValue === 'now') {
-      return new Date().toISOString();
+  private async fillUserInfo(
+    records: { id: string; fields: { [fieldNameOrId: string]: unknown } }[],
+    userFields: IFieldRaws,
+    fieldKeyType: FieldKeyType
+  ) {
+    const userIds = new Set<string>();
+    records.forEach((record) => {
+      userFields.forEach((field) => {
+        const fieldIdOrName = field[fieldKeyType];
+        const value = record.fields[fieldIdOrName];
+        if (value) {
+          if (Array.isArray(value)) {
+            value.forEach((v) => userIds.add(v.id));
+          } else {
+            userIds.add((value as { id: string }).id);
+          }
+        }
+      });
+    });
+
+    const userInfo = await this.getUserInfoFromDatabase(Array.from(userIds));
+
+    return records.map((record) => {
+      const updatedFields = { ...record.fields };
+      userFields.forEach((field) => {
+        const fieldIdOrName = field[fieldKeyType];
+        const value = updatedFields[fieldIdOrName];
+        if (value) {
+          if (Array.isArray(value)) {
+            updatedFields[fieldIdOrName] = value.map((v) => ({
+              ...v,
+              ...userInfo[v.id],
+            }));
+          } else {
+            updatedFields[fieldIdOrName] = {
+              ...value,
+              ...userInfo[(value as { id: string }).id],
+            };
+          }
+        }
+      });
+      return {
+        ...record,
+        fields: updatedFields,
+      };
+    });
+  }
+
+  private async getUserInfoFromDatabase(
+    userIds: string[]
+  ): Promise<{ [id: string]: { id: string; title: string; email: string } }> {
+    const usersRaw = await this.prismaService.txClient().user.findMany({
+      where: {
+        id: { in: userIds },
+        deletedTime: null,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
+    });
+    return keyBy(
+      usersRaw.map((user) => ({ id: user.id, title: user.name, email: user.email })),
+      'id'
+    );
+  }
+
+  private transformUserDefaultValue(options: IUserFieldOptions, defaultValue: string | string[]) {
+    const currentUserId = this.clsService.get('user.id');
+    const defaultIds = uniq([defaultValue].flat().map((id) => (id === 'me' ? currentUserId : id)));
+
+    if (options.isMultiple) {
+      return defaultIds.map((id) => ({ id }));
     }
-    return defaultValue;
+    return defaultIds[0] ? { id: defaultIds[0] } : undefined;
+  }
+
+  private getDefaultValue(type: FieldType, options: unknown, defaultValue: unknown) {
+    switch (type) {
+      case FieldType.Date:
+        return defaultValue === 'now' ? new Date().toISOString() : defaultValue;
+      case FieldType.SingleSelect:
+        return Array.isArray(defaultValue) ? defaultValue[0] : defaultValue;
+      case FieldType.MultipleSelect:
+        return Array.isArray(defaultValue) ? defaultValue : [defaultValue];
+      case FieldType.User:
+        return this.transformUserDefaultValue(
+          options as IUserFieldOptions,
+          defaultValue as string | string[]
+        );
+      case FieldType.Checkbox:
+        return defaultValue ? true : null;
+      default:
+        return defaultValue;
+    }
   }
 
   async createRecords(
     tableId: string,
-    recordsRo: {
-      id?: string;
-      fields: Record<string, unknown>;
-    }[],
-    fieldKeyType: FieldKeyType = FieldKeyType.Name,
-    orderIndex?: { viewId: string; indexes: number[] }
+    recordsRo: IMakeOptional<IRecordInnerRo, 'id'>[],
+    fieldKeyType: FieldKeyType = FieldKeyType.Name
   ): Promise<ICreateRecordsVo> {
     if (recordsRo.length === 0) {
       throw new BadRequestException('Create records is empty');
@@ -242,8 +307,8 @@ export class RecordCalculateService {
     const records = recordsRo.map((record) => {
       const recordId = record.id || generateRecordId();
       return {
+        ...record,
         id: recordId,
-        fields: record.fields,
       };
     });
 
@@ -256,27 +321,22 @@ export class RecordCalculateService {
         options: true,
         unique: true,
         notNull: true,
+        isComputed: true,
         isLookup: true,
         dbFieldName: true,
       },
     });
 
-    await this.recordService.batchCreateRecords(
-      tableId,
-      records,
-      fieldKeyType,
-      fieldRaws,
-      orderIndex
-    );
+    await this.recordService.batchCreateRecords(tableId, records, fieldKeyType, fieldRaws);
 
     // submit auto fill changes
     const plainRecords = await this.appendDefaultValue(records, fieldKeyType, fieldRaws);
 
     const recordIds = plainRecords.map((r) => r.id);
 
-    await this.calculateUpdatedRecord(tableId, fieldKeyType, plainRecords, true);
+    await this.fieldCalculationService.calComputedFieldsByRecordIds(tableId, recordIds);
 
-    await this.fieldCalculationService.calculateFieldsByRecordIds(tableId, recordIds);
+    await this.calculateUpdatedRecord(tableId, fieldKeyType, plainRecords, true);
 
     const snapshots = await this.recordService.getSnapshotBulk(
       tableId,

@@ -4,6 +4,7 @@ import { useToast } from '@teable/ui-lib';
 import { uniqueId } from 'lodash';
 import type { ForwardRefRenderFunction } from 'react';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import { useTranslation } from '../../../context/app/i18n';
 import type { ICell, ICellItem, IGridRef, IRectangle } from '../../grid';
 import {
   CombinedSelection,
@@ -29,6 +30,7 @@ import { LinkListType } from './interface';
 interface ILinkListProps {
   type: LinkListType;
   rowCount: number;
+  hiddenFieldIds?: string[];
   readonly?: boolean;
   isMultiple?: boolean;
   recordQuery?: IGetRecordsRo;
@@ -48,8 +50,17 @@ const LinkListBase: ForwardRefRenderFunction<ILinkListRef, ILinkListProps> = (
   props,
   forwardRef
 ) => {
-  const { readonly, type, rowCount, cellValue, recordQuery, isMultiple, onChange, onExpand } =
-    props;
+  const {
+    readonly,
+    type,
+    rowCount,
+    cellValue,
+    recordQuery,
+    isMultiple,
+    hiddenFieldIds,
+    onChange,
+    onExpand,
+  } = props;
 
   useImperativeHandle(forwardRef, () => ({
     onReset,
@@ -65,7 +76,7 @@ const LinkListBase: ForwardRefRenderFunction<ILinkListRef, ILinkListProps> = (
   const theme = useGridTheme();
   const customIcons = useGridIcons();
   const { openTooltip, closeTooltip } = useGridTooltipStore();
-  const { columns, cellValue2GridDisplay } = useGridColumns(false);
+  const { columns, cellValue2GridDisplay } = useGridColumns(false, hiddenFieldIds);
 
   const gridRef = useRef<IGridRef>(null);
   const rowCountRef = useRef<number>(rowCount);
@@ -73,6 +84,7 @@ const LinkListBase: ForwardRefRenderFunction<ILinkListRef, ILinkListProps> = (
   const isSelectedType = type === LinkListType.Selected;
   const isExpandEnable = Boolean(onExpand);
   const { toast } = useToast();
+  const { t } = useTranslation();
 
   const { recordMap, onReset, onForceUpdate, onVisibleRegionChanged } = useGridAsyncRecords(
     undefined,
@@ -122,6 +134,14 @@ const LinkListBase: ForwardRefRenderFunction<ILinkListRef, ILinkListProps> = (
         position: bounds,
       });
     }
+
+    if (type === RegionType.ColumnPrimaryIcon) {
+      openTooltip({
+        id: componentId,
+        text: t('hidden.primaryKey'),
+        position: bounds,
+      });
+    }
   };
 
   const getCellContent = useCallback<(cell: ICellItem) => ICell>(
@@ -163,7 +183,7 @@ const LinkListBase: ForwardRefRenderFunction<ILinkListRef, ILinkListProps> = (
           loadingInProgress = true;
         }
         const id = record?.id;
-        const title = record?.name ?? 'Untitled';
+        const title = record?.name ?? t('common.untitled');
         return { id, title };
       })
       .filter((r) => r.id);
@@ -182,7 +202,7 @@ const LinkListBase: ForwardRefRenderFunction<ILinkListRef, ILinkListProps> = (
     const record = recordMap[rowIndex];
     if (record == null) return;
     if (record.isDenied) {
-      toast({ description: 'No permission to view this record.' });
+      toast({ description: t('editor.link.expandRecordError') });
       return;
     }
     onExpand?.(record.id);

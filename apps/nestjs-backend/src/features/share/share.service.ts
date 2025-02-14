@@ -1,33 +1,37 @@
+/* eslint-disable sonarjs/no-duplicate-string */
 import {
   BadRequestException,
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
-import type {
-  IFilter,
-  IFieldVo,
-  IViewVo,
-  IShareViewMeta,
-  ILinkFieldOptions,
-  StatisticsFunc,
-} from '@teable/core';
+import type { IFilter, IFieldVo, IViewVo, ILinkFieldOptions, StatisticsFunc } from '@teable/core';
 import { FieldKeyType, FieldType, ViewType } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import {
-  type ShareViewFormSubmitRo,
-  type ShareViewGetVo,
-  type IShareViewRowCountRo,
-  type IShareViewAggregationsRo,
-  type IRangesRo,
-  type IShareViewGroupPointsRo,
-  type IAggregationVo,
-  type IGroupPointsVo,
-  type IRowCountVo,
-  type IShareViewLinkRecordsRo,
-  type IRecordsVo,
-  type IShareViewCollaboratorsRo,
   UploadType,
+  ShareViewLinkRecordsType,
+  PluginPosition,
+  PrincipalType,
+} from '@teable/openapi';
+import type {
+  IShareViewCalendarDailyCollectionRo,
+  ShareViewFormSubmitRo,
+  ShareViewGetVo,
+  IShareViewRowCountRo,
+  IShareViewAggregationsRo,
+  IRangesRo,
+  IShareViewGroupPointsRo,
+  IAggregationVo,
+  IGroupPointsVo,
+  IRowCountVo,
+  IShareViewLinkRecordsRo,
+  IRecordsVo,
+  IShareViewCollaboratorsRo,
+  ISearchCountRo,
+  ISearchIndexByQueryRo,
+  UserCollaboratorItem,
 } from '@teable/openapi';
 import { Knex } from 'knex';
 import { isEmpty, pick } from 'lodash';
@@ -47,14 +51,8 @@ import { createFieldInstanceByVo } from '../field/model/factory';
 import { RecordOpenApiService } from '../record/open-api/record-open-api.service';
 import { RecordService } from '../record/record.service';
 import { SelectionService } from '../selection/selection.service';
-import { createViewVoByRaw } from '../view/model/factory';
 import { ViewService } from '../view/view.service';
-
-export interface IShareViewInfo {
-  shareId: string;
-  tableId: string;
-  view: IViewVo;
-}
+import type { IShareViewInfo } from './share-auth.service';
 
 export interface IJwtShareInfo {
   shareId: string;
@@ -65,6 +63,7 @@ export interface IJwtShareInfo {
 export class ShareService {
   constructor(
     private readonly prismaService: PrismaService,
+    private readonly viewService: ViewService,
     private readonly fieldService: FieldService,
     private readonly recordService: RecordService,
     private readonly aggregationService: AggregationService,
@@ -72,35 +71,70 @@ export class ShareService {
     private readonly selectionService: SelectionService,
     private readonly collaboratorService: CollaboratorService,
     private readonly cls: ClsService<IClsStore>,
-    private readonly viewService: ViewService,
     @InjectDbProvider() private readonly dbProvider: IDbProvider,
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex
   ) {}
 
-  async getShareView(shareId: string): Promise<ShareViewGetVo> {
-    const view = await this.prismaService.view.findFirst({
-      where: { shareId, enableShare: true, deletedTime: null },
-    });
-    if (!view) {
-      throw new BadRequestException('share view not found');
-    }
-    const shareMeta = view.shareMeta ? (JSON.parse(view.shareMeta) as IShareViewMeta) : undefined;
-    const { tableId, id: viewId } = view;
+  async getShareView(shareInfo: IShareViewInfo): Promise<ShareViewGetVo> {
+    const { shareId, tableId, view, linkOptions, shareMeta } = shareInfo;
+    const { id, group } = view ?? {};
+    const { filterByViewId, filter, visibleFieldIds } = linkOptions ?? {};
+    const viewId = filterByViewId ?? id;
+
     const fields = await this.fieldService.getFieldsByQuery(tableId, {
-      viewId: view.id,
-      filterHidden: !shareMeta?.includeHiddenField,
+      viewId,
+      filterHidden: Boolean(filterByViewId) || !shareMeta?.includeHiddenField,
     });
+    const filteredFields = visibleFieldIds?.length
+      ? fields.filter((f) => visibleFieldIds?.includes(f.id) || f.isPrimary)
+      : fields;
 
     let records: IRecordsVo['records'] = [];
-    if (view.type !== ViewType.Form) {
+    let extra: ShareViewGetVo['extra'];
+    if (shareMeta?.includeRecords) {
       const recordsData = await this.recordService.getRecords(tableId, {
         viewId,
         skip: 0,
         take: 50,
+        filter,
+        groupBy: group,
         fieldKeyType: FieldKeyType.Id,
-        projection: fields.map((f) => f.id),
+        projection: filteredFields.map((f) => f.id),
       });
       records = recordsData.records;
+      extra = recordsData.extra;
+    }
+
+    if (view?.type === ViewType.Plugin) {
+      const pluginInstall = await this.prismaService.pluginInstall.findFirst({
+        where: { positionId: viewId, position: PluginPosition.View },
+        select: {
+          id: true,
+          pluginId: true,
+          name: true,
+          storage: true,
+          plugin: {
+            select: {
+              url: true,
+            },
+          },
+        },
+      });
+      if (!pluginInstall) {
+        throw new NotFoundException(`Plugin install not found`);
+      }
+      const plugin = {
+        pluginId: pluginInstall.pluginId,
+        pluginInstallId: pluginInstall.id,
+        name: pluginInstall.name,
+        storage: pluginInstall.storage ? JSON.parse(pluginInstall.storage) : undefined,
+        url: pluginInstall.plugin.url || undefined,
+      };
+      if (extra) {
+        extra.plugin = plugin;
+      } else {
+        extra = { plugin: plugin };
+      }
     }
 
     return {
@@ -108,9 +142,10 @@ export class ShareService {
       shareId,
       tableId,
       viewId,
-      view: this.viewService.convertViewVoAttachmentUrl(createViewVoByRaw(view)),
-      fields,
+      view: view ? this.viewService.convertViewVoAttachmentUrl(view) : undefined,
+      fields: filteredFields,
       records,
+      extra,
     };
   }
 
@@ -118,22 +153,32 @@ export class ShareService {
     shareInfo: IShareViewInfo,
     query: IShareViewAggregationsRo = {}
   ): Promise<IAggregationVo> {
-    const viewId = shareInfo.view.id;
-    const tableId = shareInfo.tableId;
+    const { tableId, shareMeta } = shareInfo;
+    if (!shareMeta?.includeRecords) {
+      return { aggregations: [] };
+    }
+    const viewId = shareInfo.view?.id;
     const filter = query?.filter ?? null;
+    const groupBy = query?.groupBy ?? null;
     const fieldStats: Array<{ fieldId: string; statisticFunc: StatisticsFunc }> = [];
     if (query?.field) {
       Object.entries(query.field).forEach(([key, value]) => {
-        const stats = value.map((fieldId) => ({
-          fieldId,
-          statisticFunc: key as StatisticsFunc,
-        }));
+        const stats = value.map((fieldId) => {
+          // check field hidden
+          if (shareInfo.view) {
+            this.preCheckFieldHidden(shareInfo.view as IViewVo, key);
+          }
+          return {
+            fieldId,
+            statisticFunc: key as StatisticsFunc,
+          };
+        });
         fieldStats.push(...stats);
       });
     }
     const result = await this.aggregationService.performAggregation({
       tableId,
-      withView: { viewId, customFilter: filter, customFieldStats: fieldStats },
+      withView: { viewId, customFilter: filter, customFieldStats: fieldStats, groupBy },
     });
 
     return { aggregations: result?.aggregations };
@@ -143,9 +188,21 @@ export class ShareService {
     shareInfo: IShareViewInfo,
     query?: IShareViewRowCountRo
   ): Promise<IRowCountVo> {
-    const viewId = shareInfo.view.id;
+    const { view, linkOptions, shareMeta } = shareInfo;
+
+    if (!shareMeta?.includeRecords) {
+      return { rowCount: 0 };
+    }
+
+    const { id } = view ?? {};
+    const { filterByViewId, filter } = linkOptions ?? {};
+    const viewId = filterByViewId ?? id;
     const tableId = shareInfo.tableId;
-    const result = await this.aggregationService.performRowCount(tableId, { viewId, ...query });
+    const result = await this.aggregationService.performRowCount(tableId, {
+      viewId,
+      filter,
+      ...query,
+    });
 
     return {
       rowCount: result.rowCount,
@@ -153,14 +210,20 @@ export class ShareService {
   }
 
   async formSubmit(shareInfo: IShareViewInfo, shareViewFormSubmitRo: ShareViewFormSubmitRo) {
-    const { tableId, view } = shareInfo;
-    const { fields } = shareViewFormSubmitRo;
-    if (view.type !== ViewType.Form) {
-      throw new ForbiddenException('view type is not form');
+    const { tableId, view, shareMeta } = shareInfo;
+    const { fields, typecast } = shareViewFormSubmitRo;
+    if (!shareMeta?.submit?.allow) {
+      throw new ForbiddenException('not allowed to submit');
     }
+    if (!view) {
+      throw new ForbiddenException('view is required');
+    }
+
+    const viewId = view.id;
+
     // check field hidden
     const visibleFields = await this.fieldService.getFieldsByQuery(tableId, {
-      viewId: view.id,
+      viewId,
       filterHidden: !view.shareMeta?.includeHiddenField,
     });
     const visibleFieldIds = visibleFields.map(({ id }) => id);
@@ -174,10 +237,11 @@ export class ShareService {
     }
 
     const { records } = await this.prismaService.$tx(async () => {
-      this.cls.set('entry', { type: 'form', id: view.id });
-      return await this.recordOpenApiService.createRecords(tableId, {
+      this.cls.set('entry', { type: 'form', id: viewId });
+      return this.recordOpenApiService.createRecords(tableId, {
         records: [{ fields }],
         fieldKeyType: FieldKeyType.Id,
+        typecast,
       });
     });
     if (records.length === 0) {
@@ -187,17 +251,17 @@ export class ShareService {
   }
 
   async copy(shareInfo: IShareViewInfo, shareViewCopyRo: IRangesRo) {
-    if (!shareInfo.view.shareMeta?.allowCopy) {
+    if (!shareInfo.shareMeta?.allowCopy) {
       throw new ForbiddenException('not allowed to copy');
     }
 
     return this.selectionService.copy(shareInfo.tableId, {
-      viewId: shareInfo.view.id,
+      viewId: shareInfo.view?.id,
       ...shareViewCopyRo,
     });
   }
 
-  private async preCheckFieldHidden(view: IViewVo, fieldId: string) {
+  private preCheckFieldHidden(view: IViewVo, fieldId: string) {
     // hidden check
     if (!view.shareMeta?.includeHiddenField && !isNotHiddenField(fieldId, view)) {
       throw new ForbiddenException('field is hidden, not allowed');
@@ -207,8 +271,11 @@ export class ShareService {
   async getViewLinkRecords(shareInfo: IShareViewInfo, query: IShareViewLinkRecordsRo) {
     const { tableId, view } = shareInfo;
     const { fieldId } = query;
+    if (!view) {
+      throw new ForbiddenException('view is required');
+    }
 
-    await this.preCheckFieldHidden(view, fieldId);
+    this.preCheckFieldHidden(view as IViewVo, fieldId);
 
     // link field check
     const field = await this.fieldService.getField(tableId, fieldId);
@@ -219,6 +286,11 @@ export class ShareService {
     let recordsVo: IRecordsVo;
     if (view.type === ViewType.Form) {
       recordsVo = await this.getFormLinkRecords(field, query);
+    } else if (view.type === ViewType.Plugin) {
+      recordsVo =
+        query.type === ShareViewLinkRecordsType.Candidate
+          ? await this.getFormLinkRecords(field, query)
+          : await this.getViewFilterLinkRecords(field, query);
     } else {
       recordsVo = await this.getViewFilterLinkRecords(field, query);
     }
@@ -226,13 +298,16 @@ export class ShareService {
   }
 
   async getFormLinkRecords(field: IFieldVo, query: IShareViewLinkRecordsRo) {
-    const { lookupFieldId, foreignTableId } = field.options as ILinkFieldOptions;
+    const { lookupFieldId, foreignTableId, filter, filterByViewId } =
+      field.options as ILinkFieldOptions;
     const { take, skip, search } = query;
 
     return this.recordService.getRecords(foreignTableId, {
+      viewId: filterByViewId ?? undefined,
+      filter,
       take,
       skip,
-      search: search ? [search, lookupFieldId] : undefined,
+      search: search ? [search, lookupFieldId, true] : undefined,
       projection: [lookupFieldId],
       fieldKeyType: FieldKeyType.Id,
       filterLinkCellCandidate: field.id,
@@ -247,7 +322,7 @@ export class ShareService {
     return this.recordService.getRecords(foreignTableId, {
       skip,
       take,
-      search: search ? [search, lookupFieldId] : undefined,
+      search: search ? [search, lookupFieldId, true] : undefined,
       fieldKeyType: FieldKeyType.Id,
       projection: [lookupFieldId],
       filterLinkCellSelected: fieldId,
@@ -258,45 +333,60 @@ export class ShareService {
     shareInfo: IShareViewInfo,
     query?: IShareViewGroupPointsRo
   ): Promise<IGroupPointsVo> {
-    const viewId = shareInfo.view.id;
+    if (!shareInfo.shareMeta?.includeRecords) {
+      return [];
+    }
+    const viewId = shareInfo.view?.id;
     const tableId = shareInfo.tableId;
-
+    const view = shareInfo.view;
     if (viewId == null) return null;
 
-    return await this.aggregationService.getGroupPoints(tableId, { ...query, viewId });
+    if (view) {
+      query?.groupBy?.forEach(({ fieldId }) => {
+        this.preCheckFieldHidden(view, fieldId);
+      });
+    }
+
+    return this.aggregationService.getGroupPoints(tableId, { ...query, viewId });
   }
 
   async getViewCollaborators(shareInfo: IShareViewInfo, query: IShareViewCollaboratorsRo) {
     const { view, tableId } = shareInfo;
     const { fieldId } = query;
 
-    // only form and kanban view can get all records
-    if ([ViewType.Form, ViewType.Kanban].includes(view.type)) {
-      return this.getViewAllCollaborators(shareInfo);
+    if (!view) {
+      return this.getViewAllCollaborators(shareInfo, query);
+    }
+
+    // only form, kanban and plugin view can get all collaborators
+    if ([ViewType.Form, ViewType.Kanban, ViewType.Plugin].includes(view.type)) {
+      return this.getViewAllCollaborators(shareInfo, query);
     }
 
     if (!fieldId) {
       throw new BadRequestException('fieldId is required');
     }
 
-    await this.preCheckFieldHidden(view, fieldId);
+    await this.preCheckFieldHidden(view as IViewVo, fieldId);
 
     // user field check
     const field = await this.fieldService.getField(tableId, fieldId);
     // All user field, contains lastModifiedBy, createdBy
-    if (field.type !== FieldType.User) {
-      throw new ForbiddenException('field type is not user field');
+    if (![FieldType.User, FieldType.LastModifiedBy, FieldType.CreatedBy].includes(field.type)) {
+      throw new ForbiddenException('field type is not user-related field');
     }
 
-    return this.getViewFilterCollaborators(shareInfo, field);
+    return this.getViewFilterCollaborators(shareInfo, field, query);
   }
 
   private async getViewFilterUserQuery(
     tableId: string,
     filter: IFilter | undefined,
     userField: IFieldVo,
-    fieldMap: Record<string, IFieldInstance>
+    fieldMap: Record<string, IFieldInstance>,
+    query?: { skip?: number; take?: number; search?: string }
   ) {
+    const { skip = 0, take = 50, search } = query ?? {};
     const dbTableName = await this.recordService.getDbTableName(tableId);
     const queryBuilder = this.knex(dbTableName);
     const { isMultipleCellValue, dbFieldName } = userField;
@@ -305,15 +395,35 @@ export class ShareService {
     queryBuilder.whereNotNull(dbFieldName);
     this.dbProvider.filterQuery(queryBuilder, fieldMap, filter).appendQueryBuilder();
 
-    return this.knex('users')
+    const resQuery = this.knex('users')
       .select('id', 'email', 'name', 'avatar')
       .from(this.knex.raw(`(${queryBuilder.toQuery()}) AS coll`))
-      .leftJoin('users', 'users.id', '=', 'coll.user_id')
-      .toQuery();
+      .leftJoin('users', 'users.id', '=', 'coll.user_id');
+    if (search) {
+      this.dbProvider.searchBuilder(resQuery, [
+        ['users.name', search],
+        ['users.email', search],
+      ]);
+    }
+    if (skip) {
+      resQuery.offset(skip);
+    }
+    if (take) {
+      resQuery.limit(take);
+    }
+    return resQuery.toQuery();
   }
 
-  async getViewFilterCollaborators(shareInfo: IShareViewInfo, field: IFieldVo) {
+  async getViewFilterCollaborators(
+    shareInfo: IShareViewInfo,
+    field: IFieldVo,
+    query?: { skip?: number; take?: number; search?: string }
+  ) {
     const { tableId, view } = shareInfo;
+    if (!view) {
+      throw new ForbiddenException('view is required');
+    }
+
     const fields = await this.fieldService.getFieldsByQuery(tableId, {
       viewId: view.id,
     });
@@ -328,7 +438,8 @@ export class ShareService {
           return acc;
         },
         {} as Record<string, IFieldInstance>
-      )
+      ),
+      query
     );
 
     const users = await this.prismaService
@@ -346,26 +457,57 @@ export class ShareService {
     }));
   }
 
-  async getViewAllCollaborators(shareInfo: IShareViewInfo) {
+  async getViewAllCollaborators(
+    shareInfo: IShareViewInfo,
+    query?: { skip?: number; take?: number; search?: string }
+  ) {
+    const { skip = 0, take = 50, search } = query ?? {};
     const { tableId, view } = shareInfo;
 
-    if (![ViewType.Form, ViewType.Kanban].includes(view.type)) {
+    if (view && ![ViewType.Form, ViewType.Kanban, ViewType.Plugin].includes(view.type)) {
       throw new ForbiddenException('view type is not allowed');
     }
 
     const fields = await this.fieldService.getFieldsByQuery(tableId, {
-      viewId: view.id,
-      filterHidden: !view.shareMeta?.includeHiddenField,
+      viewId: view?.id,
+      filterHidden: !view?.shareMeta?.includeHiddenField,
     });
     // If there is no user field, return an empty array
-    if (!fields.some((field) => field.type === FieldType.User)) {
+    if (
+      !fields.some((field) =>
+        [FieldType.User, FieldType.CreatedBy, FieldType.LastModifiedBy].includes(field.type)
+      )
+    ) {
       return [];
     }
     const { baseId } = await this.prismaService.txClient().tableMeta.findUniqueOrThrow({
       select: { baseId: true },
       where: { id: tableId },
     });
-    const list = await this.collaboratorService.getListByBase(baseId);
+    const list = (await this.collaboratorService.getListByBase(baseId, {
+      skip,
+      take,
+      search,
+      type: PrincipalType.User,
+    })) as UserCollaboratorItem[];
     return list.map((item) => pick(item, 'userId', 'email', 'userName', 'avatar'));
+  }
+
+  async getShareSearchCount(tableId: string, query: ISearchCountRo) {
+    return this.aggregationService.getSearchCount(tableId, query);
+  }
+
+  async getShareSearchIndex(tableId: string, query: ISearchIndexByQueryRo) {
+    return this.aggregationService.getRecordIndexBySearchOrder(tableId, query);
+  }
+
+  async getViewCalendarDailyCollection(
+    shareInfo: IShareViewInfo,
+    query: IShareViewCalendarDailyCollectionRo
+  ) {
+    return this.aggregationService.getCalendarDailyCollection(shareInfo.tableId, {
+      ...query,
+      viewId: shareInfo.view?.id,
+    });
   }
 }

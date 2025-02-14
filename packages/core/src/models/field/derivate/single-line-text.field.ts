@@ -5,6 +5,10 @@ import { singleLineTextShowAsSchema } from '../show-as';
 
 export const singlelineTextFieldOptionsSchema = z.object({
   showAs: singleLineTextShowAsSchema.optional(),
+  defaultValue: z
+    .string()
+    .optional()
+    .transform((value) => (typeof value === 'string' ? value.trim() : value)),
 });
 
 export type ISingleLineTextFieldOptions = z.infer<typeof singlelineTextFieldOptionsSchema>;
@@ -44,7 +48,8 @@ export class SingleLineTextFieldCore extends FieldCore {
       return null;
     }
 
-    return value.replace(/\n|\r/g, ' ');
+    // eslint-disable-next-line regexp/prefer-character-class
+    return value.replace(/\n|\r|\t/g, ' ').trim();
   }
 
   repair(value: unknown) {

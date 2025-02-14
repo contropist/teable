@@ -7,6 +7,7 @@
       "share": {
         "label": "Share",
         "statusLabel": "Sharing",
+        "noPermission": "No permission to share view",
         "shareLink": "Share Link",
         "copied": "Copied",
         "genLink": "Generate new link",
@@ -16,8 +17,14 @@
         "tips": "People who have the link can see the view.",
         "passwordTitle": "Enter a password",
         "passwordTips": "Password restrictions for accessing shared views",
+        "embed": "Embed",
+        "embedPreview": "Embed preview",
+        "hideToolbar": "Hide toolbar",
+        "URLSetting": "URL parameters config",
+        "URLSettingDescription": "Adjusting the following settings will not affect the shared links. You need to copy the link with new parameters to make it take effect",
         "cancel": "Cancel",
-        "save": "Save"
+        "save": "Save",
+        "requireLogin": "Require login submit"
       },
       "extensions": {
         "label": "Extensions",
@@ -27,22 +34,163 @@
         "label": "API",
         "restfulApi": "Restful API",
         "databaseConnection": "Database Connection"
+      },
+      "personalView": {
+        "personal": "Personal",
+        "collaborative": "Collaborative",
+        "dialog": {
+          "title": "Switch to view collaborative mode",
+          "description": "Switch to view collaborative mode, the personal configuration of the view will be synchronized with everyone, please confirm whether to synchronize",
+          "cancelText": "Not synchronize",
+          "confirmText": "Synchronize"
+        }
       }
     }
+  },
+  "welcome": {
+    "title": "Welcome",
+    "description": "Click the + sign on the left sidebar to create a table.",
+    "help": "Visit the <HelpCenter /> for more information.",
+    "helpCenter": "Help Center"
   },
   "field": {
     "fieldManagement": "Field Management",
     "fieldManagementDesc": "Detailed properties for all fields of the current table",
+    "advancedProps": "Advanced properties",
+    "hide": "hide",
+    "default": {
+      "singleLineText": {
+        "title": "Label"
+      },
+      "longText": {
+        "title": "Notes"
+      },
+      "number": {
+        "title": "Number",
+        "formatType": "Format Type",
+        "currencySymbol": "Currency Symbol",
+        "defaultSymbol": "$",
+        "precision": "Precision",
+        "decimalExample": "Decimal (1.0)",
+        "currencyExample": "Currency ($100)",
+        "percentExample": "Percent (20%)"
+      },
+      "singleSelect": {
+        "title": "Status",
+        "options": {
+          "todo": "To Do",
+          "inProgress": "In Progress",
+          "done": "Done"
+        }
+      },
+      "multipleSelect": {
+        "title": "Tags"
+      },
+      "attachment": {
+        "title": "Attachments"
+      },
+      "user": {
+        "title": "Collaborator"
+      },
+      "date": {
+        "title": "Date",
+        "dateFormatting": "Date Formatting",
+        "timeFormatting": "Time Formatting",
+        "timeZone": "Time Zone",
+        "yearMonth": "Year/Month",
+        "monthDay": "Month/Day",
+        "year": "Year",
+        "month": "Month",
+        "day": "Day",
+        "local": "Local",
+        "friendly": "Friendly",
+        "us": "US",
+        "european": "European",
+        "asia": "Asia",
+        "custom": "Custom",
+        "12Hour": "12 hour",
+        "24Hour": "24 hour",
+        "noDisplay": "No display"
+      },
+      "autoNumber": {
+        "title": "ID"
+      },
+      "createdTime": {
+        "title": "Created time"
+      },
+      "lastModifiedTime": {
+        "title": "Last modified time"
+      },
+      "createdBy": {
+        "title": "Created by"
+      },
+      "lastModifiedBy": {
+        "title": "Last modified by"
+      },
+      "rating": {
+        "title": "Rating"
+      },
+      "checkbox": {
+        "title": "Done"
+      },
+      "formula": {
+        "title": "Calculation",
+        "formula": "Formula"
+      },
+      "lookup": {
+        "title": "{{lookupFieldName}} (from {{linkFieldName}})"
+      },
+      "rollup": {
+        "title": "{{lookupFieldName}} Rollup (from {{linkFieldName}})",
+        "rollup": "Rollup",
+        "selectAnRollupFunction": "Select an rollup function",
+        "func": {
+          "and": "AND",
+          "arrayCompact": "ARRAYCOMPACT",
+          "arrayJoin": "ARRAYJOIN",
+          "arrayUnique": "ARRAYUNIQUE",
+          "average": "AVERAGE",
+          "concatenate": "CONCATENATE",
+          "count": "COUNT",
+          "countA": "COUNTA",
+          "countAll": "COUNTALL",
+          "max": "MAX",
+          "min": "MIN",
+          "or": "OR",
+          "sum": "SUM",
+          "xor": "XOR"
+        },
+        "funcDesc": {
+          "and": "Returns true if all the values are true",
+          "arrayCompact": "Removes empty strings and null values from the array. Keeps 'false' and strings that contain one or more blank characters.",
+          "arrayJoin": "Join all the values into a single comma-separated string.",
+          "arrayUnique": "Return only unique items.",
+          "average": "Mean average of the values.",
+          "concatenate": "Joins together the text values into a single text value.",
+          "count": "Count only non-empty numeric values. If you want to count all records, use COUNTALL.",
+          "countA": "Count the number of non-empty values. This function counts both numeric and text values.",
+          "countAll": "counts all values including blank records.",
+          "max": "Returns the largest of the given numbers.",
+          "min": "Returns the smallest of the given numbers.",
+          "or": "Returns true if any one of the values is true.",
+          "sum": "Sum together the values.",
+          "xor": "Returns true if and only if odd number of values are true."
+        }
+      }
+    },
     "editor": {
       "addField": "Add Field",
       "editField": "Edit Field",
       "insertField": "Insert Field",
       "graph": "Graph",
+      "defaultValue": "Default value",
+      "reset": "Reset",
       "fieldUpdated": "Field has been updated",
       "fieldCreated": "Field has been created",
       "previewDependenciesGraph": "Preview Dependencies Graph",
       "areYouSurePerformIt": "Are you sure you want to perform it?",
       "addDescription": "Add Description",
+      "dbFieldName": "DB field name",
       "description": "Description",
       "descriptionPlaceholder": "Describe this field (optional)",
       "type": "Type",
@@ -60,16 +208,18 @@
       "maxNumber": "Max Number",
       "showNumber": "Show Number",
       "autoFillDate": "Auto Fill with current date",
-      "createSymmetricLink": "Create a symmetric link field in the link table",
-      "allowLinkMultipleRecords": "Allow linking to multiple records",
-      "allowLinkToDuplicateRecords": "Allows a record to be linked multiple times",
-      "allowSymmetricFieldLinkMultipleRecords": "Allow symmetric field linking to multiple records",
+      "createSymmetricLink": "Create a back link field in the link table",
+      "allowLinkMultipleRecords": "Allow multiple select",
+      "allowLinkToDuplicateRecords": "Allows records to be selected more than once",
+      "allowSymmetricFieldLinkMultipleRecords": "Allows records to be selected more than once",
       "oneToOne": "one-to-one",
       "oneToMany": "one-to-many",
       "manyToOne": "many-to-one",
       "manyToMany": "many-to-many",
       "self": "Self",
       "selectTable": "Select table...",
+      "selectBase": "Select a base...",
+      "linkFromExternalBase": "Link from external base",
       "inSelfLink": "in self-link",
       "betweenTwoTables": "between two tables",
       "linkTipMessage": "Tips: this configuration represents a<br></br> <b>{{relationship}}</b> relationship <span>{{linkType}}</span>",
@@ -85,10 +235,20 @@
       "lookupToTable": "{{tableName}} field you want to look up",
       "selectField": "Select a field...",
       "linkTable": "Link table",
+      "linkBase": "Link base",
+      "tableNoPermission": "No permission table",
+      "baseNoPermission": "No permission base",
       "noLinkTip": "No linked records to look up. Add a Link to another record field, then try to configure your lookup again.",
       "fieldValidationRules": "Field value validation rules",
-      "enableValidateFieldUnique": "Enable unique value validation",
-      "enableValidateFieldNotNull": "Enable not null value validation"
+      "enableValidateFieldUnique": "Forbid duplicate values",
+      "enableValidateFieldNotNull": "Forbid non-empty values",
+      "knowMore": "know more",
+      "linkFieldKnowMoreLink": "https://help.teable.io/product/fields/field-type/link",
+      "filterByView": "Filter records by view",
+      "filter": "Filter records",
+      "hideFields": "Hide fields",
+      "moreOptions": "More options",
+      "allowNewOptionsWhenEditing": "Allow new options when editing"
     },
     "subTitle": {
       "link": "Link to records in the table you choose",
@@ -115,27 +275,29 @@
       "lookup": "See values from a field in a linked record."
     },
     "fieldName": "Field Name",
+    "fieldNameOptional": "Field Name (Optional)",
     "fieldType": "Field Type"
   },
   "table": {
     "newTableLabel": "New table",
     "rename": "Rename",
     "design": "Design",
+    "tableRecordHistory": "Table record history",
     "deleteConfirm": "Are you sure you want to delete \"{{tableName}}\" ?",
     "dbTableName": "Table name in physical database",
     "schemaName": "Schema name in physical database",
-    "tableInfo": "Table Info",
-    "tableInfoDetail": "Basic information for the table",
+    "baseInfo": "Base Info",
     "typeOfDatabase": "Type of database",
     "descriptionForTable": "Description for this table",
     "nameForTable": "Name for this table",
-    "deleteTip1": "Link fields linked with this table in other tables will be converted to text fields.",
-    "deleteTip2": "This operation cannot be undone.",
+    "deleteTip1": "Link fields linked with this table in other tables will be deleted.",
+    "deleteTip2": "This table can be restored from the trash after deletion.",
     "operator": {
       "createBlank": "Create a blank table"
     },
     "actionTips": {
       "copyAndPasteEnvironment": "Copy and paste only works in HTTPS or localhost",
+      "copyAndPasteBrowser": "Copy and paste not supported in this browser",
       "copying": "Copying...",
       "copySuccessful": "Copy successful",
       "copyFailed": "Copy failed",
@@ -146,7 +308,32 @@
       "clearSuccessful": "Clear successful",
       "deleting": "Deleting...",
       "deleteSuccessful": "Delete successful",
-      "pasteFileFailed": "Files can only be pasted into an attachment field"
+      "pasteFileFailed": "Files can only be pasted into an attachment field",
+      "copyError": {
+        "noFocus": "Please keep the page active and do not switch windows"
+      }
+    },
+    "graph": {
+      "tableLabel": "Table label",
+      "effectCells": "May effect cells",
+      "estimatedTime": "Estimated time"
+    },
+    "integrity": {
+      "check": "Check",
+      "title": "Integrity check",
+      "loading": "Checking integrity...",
+      "allGood": "All good!",
+      "fixIssues": "Fix Issues"
+    },
+    "index": {
+      "description": "Indexes can significantly improve search performance, especially when dealing with large amounts of data (over {{rowCount}} rows). The downside is slightly slower write operations. If you frequently perform searches or have large datasets, it's recommended to enable indexing.",
+      "repair": "repair",
+      "repairTip": "Index anomalies detected, which may cause search performance degradation. It is recommended to click the repair button to fix the index",
+      "enableIndexTip": "You are creating an index. The time required depends on the table size. During this process, the table's read and write performance may be affected. Please be patient.",
+      "globalSearchTip": "Search all fields except date and checkbox field",
+      "autoIndexTip": "Your table has exceeded {{rowCount}} rows. We recommend enabling indexing to improve search performance. Please note that indexing may slightly reduce write speed. During index creation, table read/write performance might be temporarily affected. Please be patient.",
+      "enableIndex": "enable",
+      "keepAsIs": "keep as it"
     }
   },
   "import": {
@@ -179,11 +366,12 @@
       "leaveTip": "Your data will still be imported.",
       "fileExceedSizeTip": "This type file size exceeds the limit of",
       "analyzing": "analyzing",
+      "importing": "Importing",
       "notSupportFieldType": "Field type is not supported",
       "resultEmpty": "No results found.",
       "searchPlaceholder": "Search...",
-      "importAlert": "Once the import begins, it cannot be stopped until it is either successfully completed or terminated due to failure. The import result will be notify to you later. You'd better do not operate the table during the import, which may cause errors.",
-      "noTips": "I've know that, don't show again"
+      "importAlert": "Once the import begins, it cannot be stopped until it is either successfully completed or terminated due to failure. The import status is displayed in the upper right corner of the table. The results of import process will be notified to you once completed. You should not update the field during the import as it may cause errors.",
+      "noTips": "I know that, don't show again"
     },
     "options": {
       "autoSelectFieldOptionName": "Auto-select field types",
@@ -214,7 +402,8 @@
   },
   "grid": {
     "prefillingRowTitle": "Add new record",
-    "prefillingRowTooltip": "Please enter the new record data below. The record will be saved automatically once you click outside this row."
+    "prefillingRowTooltip": "Please enter the new record data below. The record will be saved automatically once you click outside this row.",
+    "presortRowTitle": "This record has been filtered or moved due to sorting rules"
   },
   "form": {
     "fieldsManagement": "Fields",
@@ -232,7 +421,7 @@
       "customizeCards": "Customize cards",
       "stackedBy": "Stacked by <0/>",
       "chooseStackingField": "Choose a stacking field",
-      "chooseStackingFieldDescription": "Which single select or user field would you like to use for this kanban view? Your records will be stacked based on this field.",
+      "chooseStackingFieldDescription": "Which field would you like to use for this kanban view? Your records will be stacked based on this field.",
       "hideEmptyStack": "Hide empty stack",
       "imageSetting": "Image Setting",
       "fit": "Fit",
@@ -253,12 +442,36 @@
       "insertCardAbove": "Insert card above",
       "insertCardBelow": "Insert card below",
       "expandCard": "Expand card",
-      "deleteCard": "Delete card"
+      "deleteCard": "Delete card",
+      "duplicateCard": "Duplicate card"
     }
   },
+  "calendar": {
+    "toolbar": {
+      "config": "Calendar Config",
+      "startDateField": "Start date field",
+      "endDateField": "End date field",
+      "titleField": "Title field",
+      "colorField": "Color field",
+      "colorType": "Color display",
+      "customColor": "Customize color",
+      "alignWithRecords": "Align with records"
+    },
+    "placeholder": {
+      "selectColorField": "Select a color field"
+    },
+    "dialog": {
+      "startDate": "Start date",
+      "endDate": "End date",
+      "notAdd": "Not add",
+      "addDateField": "Add date fields",
+      "content": "Create a calendar view schedule, and the table needs to have two date fields: start date and end date"
+    },
+    "moreLinkText": "Show all {{count}} records"
+  },
   "menu": {
-    "insertRecordAbove": "Insert record above",
-    "insertRecordBelow": "Insert record below",
+    "insertRecordAbove": "Insert <input /> record above",
+    "insertRecordBelow": "Insert <input /> record below",
     "copyCells": "Copy cells",
     "deleteRecord": "Delete record",
     "deleteAllSelectedRecords": "Delete all selected records",
@@ -268,13 +481,17 @@
     "freezeUpField": "Freeze up to this field",
     "hideField": "Hide field",
     "deleteField": "Delete field",
-    "deleteAllSelectedFields": "Delete all selected fields"
+    "deleteAllSelectedFields": "Delete all selected fields",
+    "filterField": "Filter by this field",
+    "sortField": "Sort by this field",
+    "groupField": "Group by this field"
   },
   "connection": {
     "title": "Database Connection",
     "description": "You can access the database directly through the database connection, including all the tables under the current base",
     "noPermission": "You don't have permission to access the database",
     "connectionCountTip": "The maximum number of database connections is <b>{{max}}</b> and the current connections is <b>{{current}}</b>",
+    "createFailed": "Please ensure that the PUBLIC_DATABASE_PROXY environment variable is set correctly",
     "helpLink": "https://help.teable.io/developer/database-connection"
   },
   "view": {
@@ -284,14 +501,45 @@
     "insertToolTip": "Automatic sorting is turned on, insert with order is not available",
     "action": {
       "rename": "Rename view",
-      "delete": "Delete view"
+      "duplicate": "Duplicate view",
+      "delete": "Delete view",
+      "lock": "Lock view",
+      "unlock": "Unlock view",
+      "enable": "Enable"
     },
     "category": {
       "table": "Grid View",
       "form": "Form View",
-      "kanban": "Kanban View"
+      "kanban": "Kanban View",
+      "gallery": "Gallery View",
+      "calendar": "Calendar View"
+    },
+    "crash": {
+      "title": "Crash!",
+      "description": "This view is broken. If the refresh still fails, please contact us. support@teable.io"
+    },
+    "addPluginView": "Add Plugin View",
+    "search": {
+      "field_one": "{{name}}",
+      "field_other": "fields({{length}})"
+    },
+    "locked": {
+      "tip": "This view is locked. You can enable personal mode to edit view options, and the changes will only take effect for yourself."
     }
   },
   "lastModifiedTime": "Last modified time",
-  "lastModify": "Last modify: "
+  "lastModify": "Last modify: ",
+  "pasteNewRecords": {
+    "title": "Do you want to add multiple records?",
+    "description": "The {{count}} records will be added to the table."
+  },
+  "tableTrash": {
+    "title": "Table trash",
+    "resourceType": "Resource type",
+    "deletedResource": "Deleted resource"
+  },
+  "plugin": {
+    "recent": "Recents",
+    "more": "Explore more..."
+  }
 }

@@ -6,7 +6,7 @@ import type {
 } from '@teable/core';
 import { FieldType, ColorUtils } from '@teable/core';
 import type { ForwardRefRenderFunction } from 'react';
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import colors from 'tailwindcss/colors';
 import { useTableId } from '../../../hooks';
 import type { MultipleSelectField, SingleSelectField } from '../../../model';
@@ -35,8 +35,14 @@ const GridSelectEditorBase: ForwardRefRenderFunction<
   const cellValue = record.getCellValue(field.id) as
     | ISingleSelectCellValue
     | IMultipleSelectCellValue;
-
   const attachStyle = useGridPopupPosition(rect, 340);
+
+  useEffect(() => {
+    if (isMultiple) {
+      editorRef.current?.setValue?.(cellValue);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(cellValue)]);
 
   useImperativeHandle(ref, () => ({
     focus: () => (editorRef.current || defaultFocusRef.current)?.focus?.(),
@@ -96,6 +102,7 @@ const GridSelectEditorBase: ForwardRefRenderFunction<
           className="absolute rounded-sm border p-2 shadow-sm"
           value={cellValue === null ? undefined : cellValue}
           isMultiple={isMultiple}
+          preventAutoNewOptions={(options as ISelectFieldOptions)?.preventAutoNewOptions}
           options={selectOptions}
           onChange={onChange}
           onOptionAdd={onOptionAdd}

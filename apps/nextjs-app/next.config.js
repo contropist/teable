@@ -80,8 +80,15 @@ const secureHeaders = createSecureHeaders({
       ? {
           defaultSrc: "'self'",
           styleSrc: ["'self'", "'unsafe-inline'"],
-          scriptSrc: ["'self'", "'unsafe-eval'", "'unsafe-inline'", 'https://www.clarity.ms'],
-          frameSrc: ["'self'"],
+          scriptSrc: [
+            "'self'",
+            "'unsafe-eval'",
+            "'unsafe-inline'",
+            'https://www.clarity.ms',
+            'https://*.teable.io',
+            'https://*.teable.cn',
+          ],
+          frameSrc: ["'self'", '*'],
           connectSrc: [
             "'self'",
             'https://*.sentry.io',

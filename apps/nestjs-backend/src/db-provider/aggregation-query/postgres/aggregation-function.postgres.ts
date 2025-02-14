@@ -5,7 +5,10 @@ import { AbstractAggregationFunction } from '../aggregation-function.abstract';
 export class AggregationFunctionPostgres extends AbstractAggregationFunction {
   unique(): string {
     const { type, isMultipleCellValue } = this.field;
-    if (type !== FieldType.User || isMultipleCellValue) {
+    if (
+      ![FieldType.User, FieldType.CreatedBy, FieldType.LastModifiedBy].includes(type) ||
+      isMultipleCellValue
+    ) {
       return super.unique();
     }
 
@@ -14,12 +17,19 @@ export class AggregationFunctionPostgres extends AbstractAggregationFunction {
 
   percentUnique(): string {
     const { type, isMultipleCellValue } = this.field;
-    if (type !== FieldType.User || isMultipleCellValue) {
-      return super.percentUnique();
+    if (
+      ![FieldType.User, FieldType.CreatedBy, FieldType.LastModifiedBy].includes(type) ||
+      isMultipleCellValue
+    ) {
+      return this.knex
+        .raw(`(COUNT(DISTINCT ??) * 1.0 / GREATEST(COUNT(*), 1)) * 100`, [this.tableColumnRef])
+        .toQuery();
     }
 
     return this.knex
-      .raw(`(COUNT(DISTINCT ?? ->> 'id') * 1.0 / COUNT(*)) * 100`, [this.tableColumnRef])
+      .raw(`(COUNT(DISTINCT ?? ->> 'id') * 1.0 / GREATEST(COUNT(*), 1)) * 100`, [
+        this.tableColumnRef,
+      ])
       .toQuery();
   }
 
@@ -38,5 +48,25 @@ export class AggregationFunctionPostgres extends AbstractAggregationFunction {
         [this.dbTableName, this.tableColumnRef]
       )
       .toQuery();
+  }
+
+  percentEmpty(): string {
+    return this.knex
+      .raw(`((COUNT(*) - COUNT(??)) * 1.0 / GREATEST(COUNT(*), 1)) * 100`, [this.tableColumnRef])
+      .toQuery();
+  }
+
+  percentFilled(): string {
+    return this.knex
+      .raw(`(COUNT(??) * 1.0 / GREATEST(COUNT(*), 1)) * 100`, [this.tableColumnRef])
+      .toQuery();
+  }
+
+  percentChecked(): string {
+    return this.percentFilled();
+  }
+
+  percentUnChecked(): string {
+    return this.percentEmpty();
   }
 }

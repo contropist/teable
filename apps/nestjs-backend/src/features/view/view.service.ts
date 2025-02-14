@@ -10,6 +10,14 @@ import type {
   IColumnMeta,
   IViewPropertyKeys,
   IFormViewOptions,
+  IGroup,
+  IViewOptions,
+  IFilter,
+  IKanbanViewOptions,
+  IFilterSet,
+  IPluginViewOptions,
+  IGalleryViewOptions,
+  ICalendarViewOptions,
 } from '@teable/core';
 import {
   getUniqName,
@@ -19,6 +27,8 @@ import {
   ViewOpBuilder,
   viewVoSchema,
   ViewType,
+  FieldType,
+  CellValueType,
 } from '@teable/core';
 import type { Prisma } from '@teable/db-main-prisma';
 import { PrismaService } from '@teable/db-main-prisma';
@@ -118,14 +128,11 @@ export class ViewService implements IReadonlyAdapterService {
       })
       .toQuery();
     await prisma.$executeRawUnsafe(createRowIndexSQL);
-    console.log('addRowIndexColumnSql', addRowIndexColumnSql);
-    console.log('createViewIndexField', createRowIndexSQL);
     return rowIndexFieldName;
   }
 
   async getOrCreateViewIndexField(dbTableName: string, viewId: string) {
     const indexFieldName = await this.existIndex(dbTableName, viewId);
-    console.log('exits', indexFieldName);
     if (indexFieldName) {
       return indexFieldName;
     }
@@ -136,7 +143,7 @@ export class ViewService implements IReadonlyAdapterService {
     // create view compensation data
     const innerViewRo = { ...viewRo };
     // primary field set visible default
-    if (viewRo.type === ViewType.Kanban) {
+    if ([ViewType.Kanban, ViewType.Gallery, ViewType.Calendar].includes(viewRo.type)) {
       const primaryField = await this.prismaService.txClient().field.findFirstOrThrow({
         where: { tableId, isPrimary: true, deletedTime: null },
         select: { id: true },
@@ -147,8 +154,67 @@ export class ViewService implements IReadonlyAdapterService {
         ...columnMeta,
         [primaryField.id]: { ...primaryFieldColumnMeta, visible: true },
       };
+
+      // set default cover field id for gallery view
+      if (innerViewRo.type === ViewType.Gallery) {
+        const fields = await this.prismaService.txClient().field.findMany({
+          where: { tableId, deletedTime: null },
+          select: { id: true, type: true },
+        });
+        const galleryOptions = (innerViewRo.options ?? {}) as IGalleryViewOptions;
+        const coverFieldId =
+          galleryOptions.coverFieldId ??
+          fields.find((field) => field.type === FieldType.Attachment)?.id;
+        innerViewRo.options = {
+          ...galleryOptions,
+          coverFieldId,
+        };
+      }
+
+      // set default start date and end date field ids for calendar view
+      if (innerViewRo.type === ViewType.Calendar) {
+        const fields = await this.prismaService.txClient().field.findMany({
+          where: { tableId, deletedTime: null },
+          select: { id: true, cellValueType: true, isMultipleCellValue: true },
+        });
+        const calendarOptions = (innerViewRo.options ?? {}) as ICalendarViewOptions;
+
+        const dateFieldIds = fields
+          .filter(
+            ({ cellValueType, isMultipleCellValue }) =>
+              cellValueType === CellValueType.DateTime && !isMultipleCellValue
+          )
+          .map(({ id }) => id);
+
+        if (!dateFieldIds.length) return innerViewRo;
+
+        const startDateFieldId = calendarOptions.startDateFieldId ?? dateFieldIds[0];
+        const endDateFieldId = calendarOptions.endDateFieldId ?? dateFieldIds[1] ?? dateFieldIds[0];
+
+        innerViewRo.options = {
+          ...calendarOptions,
+          startDateFieldId,
+          endDateFieldId,
+        };
+      }
     }
     return innerViewRo;
+  }
+
+  async restoreView(tableId: string, viewId: string) {
+    await this.prismaService.$tx(async () => {
+      await this.prismaService.txClient().view.update({
+        where: { id: viewId },
+        data: {
+          deletedTime: null,
+        },
+      });
+      const ops = ViewOpBuilder.editor.setViewProperty.build({
+        key: 'lastModifiedTime',
+        newValue: new Date().toISOString(),
+      });
+      await this.updateViewByOps(tableId, viewId, [ops]);
+    });
   }
 
   async createDbView(tableId: string, viewRo: IViewRo) {
@@ -191,7 +257,7 @@ export class ViewService implements IReadonlyAdapterService {
 
   async getViewById(viewId: string): Promise<IViewVo> {
     const viewRaw = await this.prismaService.txClient().view.findUniqueOrThrow({
-      where: { id: viewId },
+      where: { id: viewId, deletedTime: null },
     });
 
     return this.convertViewVoAttachmentUrl(createViewInstanceByRaw(viewRaw) as IViewVo);
@@ -208,6 +274,13 @@ export class ViewService implements IReadonlyAdapterService {
         (formOptions.logoUrl = formOptions.logoUrl
           ? getFullStorageUrl(StorageAdapter.getBucket(UploadType.Form), formOptions.logoUrl)
           : undefined);
+    }
+    if (viewVo.type === ViewType.Plugin) {
+      const pluginOptions = viewVo.options as IPluginViewOptions;
+      pluginOptions.pluginLogo = getFullStorageUrl(
+        StorageAdapter.getBucket(UploadType.Plugin),
+        pluginOptions.pluginLogo
+      );
     }
     return viewVo;
   }
@@ -321,15 +394,32 @@ export class ViewService implements IReadonlyAdapterService {
   }
 
   async del(_version: number, _tableId: string, viewId: string) {
-    const rowIndexFieldIndexName = this.getRowIndexFieldIndexName(viewId);
-
-    await this.prismaService.txClient().view.delete({
+    await this.prismaService.txClient().view.update({
       where: { id: viewId },
+      data: {
+        deletedTime: new Date(),
+      },
+    });
+  }
+
+  // get column order map for all views, order by fieldIds, key by viewId
+  async getColumnsMetaMap(tableId: string, fieldIds: string[]): Promise<IColumnMeta[]> {
+    const viewRaws = await this.prismaService.txClient().view.findMany({
+      select: { id: true, columnMeta: true },
+      where: { tableId, deletedTime: null },
     });
 
-    await this.prismaService.txClient().$executeRawUnsafe(`
-      DROP INDEX IF EXISTS "${rowIndexFieldIndexName}";
-    `);
+    const viewRawMap = viewRaws.reduce<{ [viewId: string]: IColumnMeta }>((pre, cur) => {
+      pre[cur.id] = JSON.parse(cur.columnMeta);
+      return pre;
+    }, {});
+
+    return fieldIds.map((fieldId) => {
+      return viewRaws.reduce<IColumnMeta>((pre, view) => {
+        pre[view.id] = viewRawMap[view.id][fieldId];
+        return pre;
+      }, {});
+    });
   }
 
   async getUpdatedColumnMeta(
@@ -362,21 +452,18 @@ export class ViewService implements IReadonlyAdapterService {
     return (
       JSON.stringify({
         ...columnMeta,
-        [fieldId]: {
-          ...columnMeta[fieldId],
-          ...newColumnMeta,
-        },
+        [fieldId]: newColumnMeta,
       }) ?? {}
     );
   }
 
-  async update(version: number, _tableId: string, viewId: string, opContexts: IViewOpContext[]) {
+  async update(version: number, tableId: string, viewId: string, opContexts: IViewOpContext[]) {
     const userId = this.cls.get('user.id');
 
     for (const opContext of opContexts) {
       const updateData: Prisma.ViewUpdateInput = { version, lastModifiedBy: userId };
       if (opContext.name === OpName.UpdateViewColumnMeta) {
-        const columnMeta = await this.getUpdatedColumnMeta(_tableId, viewId, opContext);
+        const columnMeta = await this.getUpdatedColumnMeta(tableId, viewId, opContext);
         await this.prismaService.txClient().view.update({
           where: { id: viewId },
           data: {
@@ -409,8 +496,13 @@ export class ViewService implements IReadonlyAdapterService {
 
   async getSnapshotBulk(tableId: string, ids: string[]): Promise<ISnapshotBase<IViewVo>[]> {
     const views = await this.prismaService.txClient().view.findMany({
-      where: { tableId, id: { in: ids } },
+      where: { tableId, id: { in: ids }, deletedTime: null },
     });
+
+    if (views.length !== ids.length) {
+      const notFoundIds = ids.filter((id) => !views.some((view) => view.id === id));
+      throw new BadRequestException(`View not found: ${notFoundIds.join(', ')}`);
+    }
 
     return views
       .map((view) => {
@@ -436,30 +528,15 @@ export class ViewService implements IReadonlyAdapterService {
 
   async generateViewOrderColumnMeta(tableId: string) {
     const fields = await this.prismaService.txClient().field.findMany({
-      select: {
-        id: true,
-      },
-      where: {
-        tableId,
-        deletedTime: null,
-      },
+      select: { id: true },
+      where: { tableId, deletedTime: null },
       orderBy: [
-        {
-          isPrimary: {
-            sort: 'asc',
-            nulls: 'last',
-          },
-        },
-        {
-          order: 'asc',
-        },
-        {
-          createdTime: 'asc',
-        },
+        { isPrimary: { sort: 'asc', nulls: 'last' } },
+        { order: 'asc' },
+        { createdTime: 'asc' },
       ],
     });
 
-    // create table first view there is no field should return
     if (isEmpty(fields)) {
       return;
     }
@@ -470,11 +547,11 @@ export class ViewService implements IReadonlyAdapterService {
     }, {});
   }
 
-  async updateViewColumnMetaOrder(tableId: string, fieldIds: string[]) {
+  async initViewColumnMeta(tableId: string, fieldIds: string[], columnsMeta?: IColumnMeta[]) {
     // 1. get all views id and column meta by tableId
     const view = await this.prismaService.txClient().view.findMany({
+      where: { tableId, deletedTime: null },
       select: { columnMeta: true, id: true },
-      where: { tableId: tableId },
     });
 
     if (isEmpty(view)) {
@@ -488,10 +565,13 @@ export class ViewService implements IReadonlyAdapterService {
       const maxOrder = isEmpty(curColumnMeta)
         ? -1
         : Math.max(...Object.values(curColumnMeta).map((meta) => meta.order));
-      fieldIds.forEach((fieldId) => {
+      fieldIds.forEach((fieldId, i) => {
+        const columnMeta = columnsMeta?.[i]?.[viewId];
         const op = ViewOpBuilder.editor.updateViewColumnMeta.build({
           fieldId: fieldId,
-          newColumnMeta: { order: maxOrder + 1 },
+          newColumnMeta: columnMeta
+            ? { ...columnMeta, order: columnMeta.order ?? maxOrder + 1 }
+            : { order: maxOrder + 1 },
           oldColumnMeta: undefined,
         });
         ops.push(op);
@@ -502,11 +582,19 @@ export class ViewService implements IReadonlyAdapterService {
     }
   }
 
-  async deleteColumnMetaOrder(tableId: string, fieldIds: string[]) {
+  async deleteViewRelativeByFields(tableId: string, fieldIds: string[]) {
     // 1. get all views id and column meta by tableId
-    const view = await this.prismaService.view.findMany({
-      select: { columnMeta: true, id: true },
-      where: { tableId: tableId },
+    const view = await this.prismaService.txClient().view.findMany({
+      select: {
+        columnMeta: true,
+        group: true,
+        options: true,
+        sort: true,
+        filter: true,
+        id: true,
+        type: true,
+      },
+      where: { tableId, deletedTime: null },
     });
 
     if (!view) {
@@ -516,18 +604,113 @@ export class ViewService implements IReadonlyAdapterService {
     for (let i = 0; i < view.length; i++) {
       const ops: IOtOperation[] = [];
       const viewId = view[i].id;
+      const viewType = view[i].type;
+
       const curColumnMeta: IColumnMeta = JSON.parse(view[i].columnMeta);
+      const curSort: ISort = view[i].sort ? JSON.parse(view[i].sort!) : null;
+      const curGroup: IGroup = view[i].group ? JSON.parse(view[i].group!) : null;
+      const curOptions: IViewOptions = view[i].options ? JSON.parse(view[i].options!) : null;
+      const curFilter: IFilter = view[i].filter ? JSON.parse(view[i].filter!) : null;
+
       fieldIds.forEach((fieldId) => {
-        const op = ViewOpBuilder.editor.updateViewColumnMeta.build({
-          fieldId: fieldId,
-          newColumnMeta: null,
-          oldColumnMeta: { ...curColumnMeta[fieldId] },
-        });
-        ops.push(op);
+        const columnOps = this.getDeleteColumnMetaByFieldIdOps(curColumnMeta, fieldId);
+        ops.push(columnOps);
+
+        // filter
+        if (view[i].filter && view[i].filter?.includes(fieldId) && curFilter) {
+          const filterOps = this.getDeleteFilterByFieldIdOps(curFilter, fieldId);
+          ops.push(filterOps);
+        }
+
+        // sort
+        if (curSort && Array.isArray(curSort.sortObjs)) {
+          const sortOps = this.getDeleteSortByFieldIdOps(curSort, fieldId);
+          ops.push(sortOps);
+        }
+
+        // group
+        if (curGroup && Array.isArray(curGroup)) {
+          const groupOps = this.getDeleteGroupByFieldIdOps(curGroup, fieldId);
+          ops.push(groupOps);
+        }
+
+        // options for kanban view stackFieldId
+        if (viewType === ViewType.Kanban && curOptions) {
+          const optionsOps = this.getDeleteOptionByFieldIdOps(curOptions, fieldId);
+          ops.push(optionsOps);
+        }
       });
 
       // 2. build update ops and emit
       await this.updateViewByOps(tableId, viewId, ops);
     }
+  }
+
+  getDeleteFilterByFieldIdOps(filter: IFilterSet, fieldId: string) {
+    const newFilter = this.getDeletedFilterByFieldId(filter, fieldId);
+    return ViewOpBuilder.editor.setViewProperty.build({
+      key: 'filter',
+      newValue: newFilter,
+      oldValue: filter,
+    });
+  }
+  getDeletedFilterByFieldId(filter: IFilterSet, fieldId: string) {
+    const removeItemsByFieldId = (filter: IFilterSet, fieldId: string) => {
+      if (Array.isArray(filter.filterSet)) {
+        filter.filterSet = filter.filterSet.filter((item) => {
+          if ('fieldId' in item && item.fieldId === fieldId) {
+            return false;
+          }
+          if ('filterSet' in item && item.filterSet) {
+            removeItemsByFieldId(item, fieldId);
+            return item.filterSet.length > 0;
+          }
+          return true;
+        });
+      }
+      return filter;
+    };
+    const newFilter = removeItemsByFieldId({ ...filter }, fieldId) as IFilter;
+    return newFilter?.filterSet?.length ? newFilter : null;
+  }
+  private getDeleteSortByFieldIdOps(sort: NonNullable<ISort>, fieldId: string) {
+    const newSort: ISort = {
+      sortObjs: sort.sortObjs.filter((sortItem) => sortItem.fieldId !== fieldId),
+      manualSort: !!sort.manualSort,
+    };
+    return ViewOpBuilder.editor.setViewProperty.build({
+      key: 'sort',
+      newValue: newSort?.sortObjs.length ? newSort : null,
+      oldValue: sort,
+    });
+  }
+  private getDeleteGroupByFieldIdOps(group: NonNullable<IGroup>, fieldId: string) {
+    const newGroup: IGroup = group.filter((groupItem) => groupItem.fieldId !== fieldId);
+    return ViewOpBuilder.editor.setViewProperty.build({
+      key: 'group',
+      newValue: newGroup?.length ? newGroup : null,
+      oldValue: group,
+    });
+  }
+  private getDeleteColumnMetaByFieldIdOps(columnMeta: NonNullable<IColumnMeta>, fieldId: string) {
+    return ViewOpBuilder.editor.updateViewColumnMeta.build({
+      fieldId: fieldId,
+      newColumnMeta: null,
+      oldColumnMeta: { ...columnMeta[fieldId] },
+    });
+  }
+  private getDeleteOptionByFieldIdOps(options: IViewOptions, fieldId: string) {
+    const newOptions = { ...options } as IKanbanViewOptions;
+    if (newOptions.stackFieldId === fieldId) {
+      delete newOptions.stackFieldId;
+    }
+    if (newOptions.coverFieldId === fieldId) {
+      delete newOptions.coverFieldId;
+    }
+    return ViewOpBuilder.editor.setViewProperty.build({
+      key: 'options',
+      newValue: newOptions,
+      oldValue: options,
+    });
   }
 }

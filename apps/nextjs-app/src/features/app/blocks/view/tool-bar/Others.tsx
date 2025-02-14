@@ -1,13 +1,11 @@
-import { ViewType } from '@teable/core';
-import { ArrowUpRight, Code2, Component, Database, MoreHorizontal, Share2 } from '@teable/icons';
-import { useBase, useTableId, useTablePermission, useView } from '@teable/sdk/hooks';
+import { ArrowUpRight, Code2, Database, MoreHorizontal } from '@teable/icons';
+import { useBaseId, useTableId, useTablePermission } from '@teable/sdk/hooks';
 import { Button, cn, Popover, PopoverContent, PopoverTrigger } from '@teable/ui-lib/shadcn';
 import Link from 'next/link';
 import { useTranslation } from 'next-i18next';
 import { GUIDE_API_BUTTON } from '@/components/Guide';
-import { DbConnectionPanelTrigger } from '../../db-connection/PanelTrigger';
-import { useCellGraphStore } from '../../graph/useCellGraphStore';
 import { SearchButton } from '../search/SearchButton';
+import { PersonalViewSwitch } from './components';
 import { SharePopover } from './SharePopover';
 import { ToolBarButton } from './ToolBarButton';
 
@@ -18,12 +16,12 @@ const OthersList = ({
   classNames?: { textClassName?: string; buttonClassName?: string };
   className?: string;
 }) => {
-  const { toggleGraph } = useCellGraphStore();
-  const view = useView();
   const permission = useTablePermission();
   const { t } = useTranslation('table');
-  const base = useBase();
+  const baseId = useBaseId() as string;
   const tableId = useTableId();
+
+  const { textClassName, buttonClassName } = classNames ?? {};
 
   return (
     <div className={cn('gap-1', className)}>
@@ -32,46 +30,20 @@ const OthersList = ({
           <ToolBarButton
             isActive={isActive}
             text={text}
-            textClassName={classNames?.textClassName}
-            className={classNames?.buttonClassName}
+            textClassName={textClassName}
+            className={buttonClassName}
             disabled={!permission['view|update']}
           >
             <ArrowUpRight className="size-4" />
           </ToolBarButton>
         )}
       </SharePopover>
-
-      {view?.type === ViewType.Grid && (
-        <Popover>
-          <PopoverTrigger asChild>
-            <ToolBarButton
-              text={t('toolbar.others.extensions.label')}
-              textClassName={classNames?.textClassName}
-              className={classNames?.buttonClassName}
-            >
-              <Component className="size-4" />
-            </ToolBarButton>
-          </PopoverTrigger>
-          <PopoverContent side="bottom" align="start" className="w-40 p-0">
-            <Button
-              variant={'ghost'}
-              size={'xs'}
-              className="w-full justify-start font-normal"
-              onClick={() => toggleGraph()}
-            >
-              <Share2 className="pr-1 text-lg" />
-              {t('toolbar.others.extensions.graph')}
-            </Button>
-          </PopoverContent>
-        </Popover>
-      )}
-
       <Popover>
         <PopoverTrigger asChild>
           <ToolBarButton
             text="API"
-            className={cn(GUIDE_API_BUTTON, classNames?.buttonClassName)}
-            textClassName={classNames?.textClassName}
+            className={cn(GUIDE_API_BUTTON, buttonClassName)}
+            textClassName={textClassName}
           >
             <Code2 className="size-4" />
           </ToolBarButton>
@@ -86,7 +58,7 @@ const OthersList = ({
             <Link
               href={{
                 pathname: '/developer/tool/query-builder',
-                query: { baseId: base.id, tableId },
+                query: { baseId, tableId },
               }}
               target="_blank"
             >
@@ -94,14 +66,25 @@ const OthersList = ({
               {t('toolbar.others.api.restfulApi')}
             </Link>
           </Button>
-          <DbConnectionPanelTrigger>
-            <Button variant={'ghost'} size={'xs'} className="w-full justify-start font-normal">
+          <Button
+            variant={'ghost'}
+            size={'xs'}
+            className="w-full justify-start font-normal"
+            asChild
+          >
+            <Link
+              href={{
+                pathname: '/base/[baseId]/design',
+                query: { baseId, tableId },
+              }}
+            >
               <Database className="pr-1 text-lg" />
               {t('toolbar.others.api.databaseConnection')}
-            </Button>
-          </DbConnectionPanelTrigger>
+            </Link>
+          </Button>
         </PopoverContent>
       </Popover>
+      <PersonalViewSwitch textClassName={textClassName} buttonClassName={buttonClassName} />
     </div>
   );
 };
@@ -130,13 +113,13 @@ const OthersMenu = ({ className }: { className?: string }) => {
 
 export const Others: React.FC = () => {
   return (
-    <div className="flex flex-1 justify-end gap-1 @container/toolbar-others">
+    <div className="flex flex-1 justify-end @container/toolbar-others md:gap-1">
       <SearchButton />
       <OthersList
-        className="hidden @sm/toolbar:flex"
+        className="hidden @md/toolbar:flex"
         classNames={{ textClassName: '@[300px]/toolbar-others:inline' }}
       />
-      <OthersMenu className="@sm/toolbar:hidden" />
+      <OthersMenu className="@md/toolbar:hidden" />
     </div>
   );
 };

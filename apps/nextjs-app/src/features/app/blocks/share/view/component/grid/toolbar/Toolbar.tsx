@@ -1,12 +1,11 @@
-import { FieldType, type IGridViewOptions } from '@teable/core';
+import { type IGridViewOptions } from '@teable/core';
 import { ArrowUpDown, EyeOff, Filter as FilterIcon, LayoutList } from '@teable/icons';
-import { Filter, useView, RowHeight, Group, HideFields } from '@teable/sdk';
+import { useView, RowHeight, Group, HideFields } from '@teable/sdk';
 import { cn } from '@teable/ui-lib/shadcn';
 import { useToolbarChange } from '@/features/app/blocks/view/hooks/useToolbarChange';
 import { SearchButton } from '@/features/app/blocks/view/search/SearchButton';
 import { ToolBarButton } from '@/features/app/blocks/view/tool-bar/ToolBarButton';
-import { FilterLink } from './filter-link';
-import { FilterUser } from './FilterUser';
+import { ShareViewFilter } from '../../share-view-filter';
 import { Sort } from './Sort';
 
 export const Toolbar = () => {
@@ -27,14 +26,7 @@ export const Toolbar = () => {
           </ToolBarButton>
         )}
       </HideFields>
-      <Filter
-        components={{
-          [FieldType.User]: FilterUser,
-          [FieldType.Link]: FilterLink,
-        }}
-        filters={view?.filter || null}
-        onChange={onFilterChange}
-      >
+      <ShareViewFilter filters={view?.filter || null} onChange={onFilterChange}>
         {(text, isActive) => (
           <ToolBarButton
             isActive={isActive}
@@ -49,7 +41,7 @@ export const Toolbar = () => {
             <FilterIcon className="size-4 text-sm" />
           </ToolBarButton>
         )}
-      </Filter>
+      </ShareViewFilter>
       <Sort sorts={view?.sort || null} onChange={onSortChange}>
         {(text: string, isActive) => (
           <ToolBarButton
@@ -93,7 +85,7 @@ export const Toolbar = () => {
         )}
       </RowHeight>
       <div className="flex w-10 flex-1 justify-end">
-        <SearchButton />
+        <SearchButton shareView />
       </div>
     </div>
   );

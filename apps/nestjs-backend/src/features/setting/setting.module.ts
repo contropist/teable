@@ -1,11 +1,14 @@
 import { Module } from '@nestjs/common';
-import { AdminGuard } from './admin.guard';
+import { AttachmentsCropModule } from '../attachments/attachments-crop.module';
+import { AdminController } from './admin.controller';
+import { AdminService } from './admin.service';
 import { SettingController } from './setting.controller';
 import { SettingService } from './setting.service';
 
 @Module({
-  controllers: [SettingController],
+  imports: [AttachmentsCropModule],
+  controllers: [SettingController, AdminController],
   exports: [SettingService],
-  providers: [SettingService, AdminGuard],
+  providers: [SettingService, AdminService],
 })
 export class SettingModule {}

@@ -1,5 +1,9 @@
 import type { IFieldOptionsRo, IFieldVo } from '@teable/core';
-import { FieldType } from '@teable/core';
+import {
+  FieldType,
+  checkFieldNotNullValidationEnabled,
+  checkFieldUniqueValidationEnabled,
+} from '@teable/core';
 import { useFieldStaticGetter } from '@teable/sdk';
 import { Textarea } from '@teable/ui-lib/shadcn';
 import { Input } from '@teable/ui-lib/shadcn/ui/input';
@@ -13,15 +17,17 @@ import { useUpdateLookupOptions } from './hooks/useUpdateLookupOptions';
 import { LookupOptions } from './lookup-options/LookupOptions';
 import { SelectFieldType } from './SelectFieldType';
 import { SystemInfo } from './SystemInfo';
-import type { FieldOperator, IFieldEditorRo } from './type';
+import { FieldOperator } from './type';
+import type { IFieldEditorRo } from './type';
 import { useFieldTypeSubtitle } from './useFieldTypeSubtitle';
 
 export const FieldEditor = (props: {
+  isPrimary?: boolean;
   field: Partial<IFieldEditorRo>;
   operator: FieldOperator;
   onChange?: (field: IFieldEditorRo) => void;
 }) => {
-  const { field, operator, onChange } = props;
+  const { isPrimary, field, operator, onChange } = props;
   const [showDescription, setShowDescription] = useState<boolean>(Boolean(field.description));
   const setFieldFn = useCallback(
     (field: IFieldEditorRo) => {
@@ -47,7 +53,20 @@ export const FieldEditor = (props: {
         type: FieldType.SingleLineText, // reset fieldType to default
         options: undefined, // reset options
         isLookup: true,
+        unique: undefined,
+        notNull: undefined,
       });
+    }
+
+    let options: IFieldOptionsRo | undefined = getFieldStatic(type, false)
+      .defaultOptions as IFieldOptionsRo;
+
+    if (
+      [field.type, type].every((t) =>
+        [FieldType.MultipleSelect, FieldType.SingleSelect].includes(t as FieldType)
+      )
+    ) {
+      options = field.options;
     }
 
     setFieldFn({
@@ -55,7 +74,12 @@ export const FieldEditor = (props: {
       type,
       isLookup: undefined,
       lookupOptions: undefined,
-      options: getFieldStatic(type, false).defaultOptions as IFieldOptionsRo,
+      options,
+      unique: checkFieldUniqueValidationEnabled(type, field.isLookup) ? field.unique : undefined,
+      notNull:
+        operator === FieldOperator.Edit && checkFieldNotNullValidationEnabled(type, field.isLookup)
+          ? field.notNull
+          : undefined,
     });
   };
 
@@ -79,6 +103,7 @@ export const FieldEditor = (props: {
       return (
         <>
           <LookupOptions options={field.lookupOptions} onChange={updateLookupOptions} />
+          <hr className="my-2" />
           <FieldOptions field={field} onChange={updateFieldOptions} />
         </>
       );
@@ -101,13 +126,16 @@ export const FieldEditor = (props: {
       <div className="relative flex w-full flex-col gap-2">
         <p className="label-text">{t('common:name')}</p>
         <Input
-          placeholder="Field name (optional)"
+          placeholder={t('table:field.fieldNameOptional')}
+          type="text"
           className="h-8"
           value={field['name'] || ''}
+          data-1p-ignore="true"
+          autoComplete="off"
           onChange={(e) => updateFieldProps({ name: e.target.value || undefined })}
         />
         {/* should place after the name input to make sure tab index correct */}
-        <SystemInfo field={field as IFieldVo} />
+        <SystemInfo field={field as IFieldVo} updateFieldProps={updateFieldProps} />
         {!showDescription && (
           <p className="text-left text-xs font-medium text-slate-500">
             <span
@@ -146,6 +174,7 @@ export const FieldEditor = (props: {
           <span className="label-text mb-2">{t('table:field.editor.type')}</span>
         </div>
         <SelectFieldType
+          isPrimary={isPrimary}
           value={field.isLookup ? 'lookup' : field.type}
           onChange={updateFieldTypeWithLookup}
         />

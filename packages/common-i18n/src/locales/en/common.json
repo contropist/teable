@@ -1,6 +1,8 @@
 {
   "brand": "Teable",
   "actions": {
+    "title": "Actions",
+    "add": "Add",
     "save": "Save",
     "doNotSave": "Don't Save",
     "submit": "Submit",
@@ -15,11 +17,14 @@
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
     "back": "Back",
+    "remove": "Remove",
     "saveSucceed": "Save Succeed!",
     "submitSucceed": "Submit Succeed!",
     "editSucceed": "Edit Succeed!",
     "updateSucceed": "Update Succeed!",
     "deleteSucceed": "Delete Succeed!",
+    "resetSucceed": "Empty trash Succeed!",
+    "restoreSucceed": "Restored Succeed!",
     "loading": "Loading...",
     "refreshPage": "Refresh Page",
     "yesDelete": "Yes, delete",
@@ -29,11 +34,22 @@
     "upgrade": "Upgrade",
     "search": "Search",
     "loadMore": "Load more",
-    "collapseSidebar": "Collapse Sidebar"
+    "collapseSidebar": "Collapse Sidebar",
+    "restore": "Restore",
+    "permanentDelete": "Permanent Delete",
+    "globalSearch": "Global Search",
+    "fieldSearch": "Search Field",
+    "tableIndex": "Index",
+    "showAllRow": "Display all rows",
+    "hideNotMatchRow": "Hide not match row",
+    "more": "More"
   },
   "quickAction": {
     "title": "Quick Actions...",
     "placeHolder": "Type a command or search..."
+  },
+  "password": {
+    "setInvalid": "The password is invalid, at least 8 characters, and must contain at least one letter and one number."
   },
   "settings": {
     "title": "Settings",
@@ -57,8 +73,7 @@
       "changePasswordError": {
         "disMatch": "Your new password does not match.",
         "equal": "Your new password must be different from your current password.",
-        "invalid": "Your current password is invalid.",
-        "invalidNew": "Your new password is invalid, minimum 8 chars."
+        "invalid": "Your current password is invalid."
       },
       "changePasswordSuccess": {
         "title": "🎉 Change password successfully.",
@@ -72,11 +87,29 @@
         "confirm": "Confirm your password"
       },
       "addPasswordError": {
-        "disMatch": "Your password does not match.",
-        "invalid": "Your password is invalid, minimum 8 chars."
+        "disMatch": "Your password does not match."
       },
       "addPasswordSuccess": {
         "title": "🎉 Add password successfully."
+      },
+      "changeEmail": {
+        "title": "Update email",
+        "desc": "Please enter your current password and your new email.",
+        "current": "Enter your current password",
+        "new": "Enter your new email",
+        "code": "Enter the verification code",
+        "getCode": "Get verification code",
+        "error": {
+          "invalidCode": "The verification code is invalid.",
+          "invalidPassword": "The password is invalid.",
+          "invalidConflict": "The new email is already registered.",
+          "invalidSameEmail": "The new email is the same as the current email."
+        },
+        "success": {
+          "title": "🎉 Change email successfully.",
+          "desc": "You will be redirected to the login page in 2 seconds.",
+          "sendSuccess": "Verification code sent successfully."
+        }
       }
     },
     "notify": {
@@ -87,10 +120,12 @@
     "setting": {
       "title": "My Settings",
       "theme": "Theme",
-      "themeDesc": "Select the theme for the dashboard.",
+      "themeDesc": "Select the theme for the app.",
       "dark": "Dark",
       "light": "Light",
-      "system": "System"
+      "system": "System",
+      "version": "App version",
+      "language": "Language"
     },
     "nav": {
       "settings": "Settings",
@@ -121,7 +156,12 @@
     "adminPanel": "Admin Panel",
     "license": "License",
     "instanceId": "Instance ID",
-    "beta": "Beta"
+    "beta": "Beta",
+    "trash": "Trash",
+    "global": "Global",
+    "organizationPanel": "Organization Panel",
+    "unknownError": "Unknown error",
+    "float": "Float"
   },
   "level": {
     "free": "Free",
@@ -134,6 +174,7 @@
   "name": "Name",
   "description": "Description",
   "required": "Required",
+  "atLeastOne": "At least reserve a {{noun}}",
   "guide": {
     "prev": "Prev",
     "next": "Next",
@@ -146,7 +187,7 @@
     "createTableTooltipTitle": "Create a table",
     "createTableTooltipContent": "Tables are designed to efficiently handle diverse datasets, offering a versatile display of information through various data types.",
     "createViewTooltipTitle": "Create a view",
-    "createViewTooltipContent": "Currently, users can create Grid and Form views, with Gallery, Kanban, and Calendar views planned for future releases. <br></br>This variety equips users with a comprehensive toolkit for various data management tasks.",
+    "createViewTooltipContent": "Currently, users can create Grid, Gallery, Kanban and Form views, with Calendar views planned for future releases. <br></br>This variety equips users with a comprehensive toolkit for various data management tasks.",
     "viewFilteringTooltipTitle": "Filtering records",
     "viewFilteringTooltipContent": "One of the core features of views is the ability to filter out records from a view according to the conditions you set. <br></br>When a record is filtered out based on a condition, it is not deleted—it's just hidden from the particular view you're using to look at your table.",
     "viewSortingTooltipTitle": "Sorting records",
@@ -164,7 +205,7 @@
       "desc_one": "This space has <b>{{count}} collaborator</b>. Adding a space collaborator will give them access to all bases within this space.",
       "desc_other": "This space has <b>{{count}} collaborators</b>. Adding a space collaborator will give them access to all bases within this space.",
       "tabEmail": "Invite by email",
-      "emailPlaceholder": "Invite more space collaborators via email",
+      "emailPlaceholder": "Invite more collaborators via email",
       "tabLink": "Invite by link",
       "linkPlaceholder": "Create an invite link that grants <0/> access to anyone who opens it.",
       "emailSend": "Send invite",
@@ -177,6 +218,17 @@
       "linkCreatedTime": "created {{createdTime}}",
       "linkCopySuccess": "Link copied",
       "linkRemove": "Remove link"
+    },
+    "base": {
+      "title": "Share {{baseName}}",
+      "desc_one": "This base is shared with {{count}} collaborator.",
+      "desc_other": "This base is shared with {{count}} collaborators.",
+      "baseTitle": "Base collaborators",
+      "collaboratorSearchPlaceholder": "Find a base collaborator by name or email"
+    },
+    "addOrgCollaborator": {
+      "title": "Add organization collaborator",
+      "placeholder": "Select organization member or department"
     }
   },
   "help": {
@@ -216,7 +268,43 @@
       "allowSpaceInvitation": "Allow sending space invitations",
       "allowSpaceInvitationDescription": "Disabling this option will prevent users other than administrators from inviting others to join spaces. Enabling this option will allow directly invited users to create an account even if new account registration is disabled.",
       "allowSpaceCreation": "Allow everyone to create new spaces",
-      "allowSpaceCreationDescription": "Disabling this option will prevent users other than administrators from creating new spaces."
+      "allowSpaceCreationDescription": "Disabling this option will prevent users other than administrators from creating new spaces.",
+      "enableEmailVerification": "Enable email verification",
+      "enableEmailVerificationDescription": "Disabling this option will prevent users from creating new accounts without verifying their email address.",
+      "generalSettings": "General settings",
+      "aiSettings": "AI settings",
+      "ai": {
+        "name": "Name",
+        "nameDescription": "The name of the LLM provider",
+        "enable": "Enable AI",
+        "enableDescription": "Enable AI for current instance, all users will be able to use AI features",
+        "updateLLMProvider": "Update LLM provider",
+        "addProvider": "Add LLM provider",
+        "addProviderDescription": "Add a new LLM provider to the list",
+        "providerType": "Provider type",
+        "baseUrl": "Base URL",
+        "apiKey": "API key",
+        "baseUrlDescription": "The base URL of the LLM provider",
+        "apiKeyDescription": "The API key of the LLM provider",
+        "models": "Models",
+        "modelsDescription": "The models supported by the LLM provider",
+        "baseUrlRequired": "Base URL is required",
+        "fetchModelListError": "Failed to fetch model list",
+        "provider": "LLM provider",
+        "providerDescription": "The LLM provider to use",
+        "modelPreferences": "Model preferences",
+        "modelPreferencesDescription": "The model preferences for the LLM provider",
+        "embeddingModel": "Embedding model",
+        "embeddingModelDescription": "The embedding model to use",
+        "translationModel": "Translation model",
+        "translationModelDescription": "The translation model to use",
+        "codingModel": "Coding model",
+        "codingModelDescription": "The coding model to use",
+        "configUpdated": "AI config updated",
+        "noModelFound": "No model found.",
+        "searchModel": "Search model...",
+        "selectModel": "Select model..."
+      }
     }
   },
   "notification": {
@@ -225,8 +313,44 @@
     "read": "Read",
     "markAs": "Mark this notification as {{status}}",
     "markAllAsRead": "Mark all as read",
-    "noUnread": "No unread notifications",
+    "noUnread": "No {{status}} notifications",
     "changeSetting": "Change page notification settings",
-    "new": "new {{count}}"
+    "new": "new {{count}}",
+    "showMore": "Show more"
+  },
+  "role": {
+    "title": {
+      "owner": "Owner",
+      "creator": "Creator",
+      "editor": "Editor",
+      "commenter": "Commenter",
+      "viewer": "Viewer"
+    },
+    "description": {
+      "owner": "Can fully configure and edit bases, automation, authority matrices and manage space settings and billing",
+      "creator": "Can fully configure and edit bases, automation and enable the authority matrix",
+      "editor": "Can edit records and views, but cannot configure tables or fields",
+      "commenter": "Can comment on records",
+      "viewer": "Cannot edit or comment"
+    }
+  },
+  "trash": {
+    "type": "Type",
+    "resetTrash": "Empty trash",
+    "deletedBy": "Deleted by",
+    "deletedTime": "Deleted time",
+    "fromSpace": "From \"{{name}}\" space",
+    "permanentDeleteTips": "Are you sure you want to permanently delete \"{{name}}\" {{resource}}?",
+    "resetTrashConfirm": "Are you sure you want to empty the trash?"
+  },
+  "pluginCenter": {
+    "pluginUrlEmpty": "Plugin Not Setting url",
+    "install": "Install",
+    "publisher": "Publisher",
+    "lastUpdated": "Last Updated",
+    "pluginNotFound": "Plugin Not Found",
+    "pluginEmpty": {
+      "title": "No Plugins Yet"
+    }
   }
 }

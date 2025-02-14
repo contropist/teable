@@ -1,6 +1,6 @@
 import { HttpError, HttpErrorCode } from '@teable/core';
 import { toast } from '@teable/ui-lib';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import ReconnectingWebSocket from 'reconnecting-websocket';
 import { Connection } from 'sharedb/lib/client';
 import type { ConnectionReceiveRequest, Socket } from 'sharedb/lib/sharedb';
@@ -10,6 +10,7 @@ export function getWsPath() {
   return `${wsProtocol}//${window.location.host}/socket`;
 }
 
+const ignoreErrorCodes = [HttpErrorCode.VIEW_NOT_FOUND];
 const shareDbErrorHandler = (error: unknown) => {
   const httpError = new HttpError(error as string, 500);
   const { code, message } = httpError;
@@ -21,26 +22,23 @@ const shareDbErrorHandler = (error: unknown) => {
     window.location.reload();
     return;
   }
+  if (ignoreErrorCodes) {
+    return;
+  }
   toast({ title: 'Socket Error', variant: 'destructive', description: `${code}: ${message}` });
 };
 
 export const useConnection = (path?: string) => {
-  const [connection, setConnection] = useState(() => {
-    if (typeof window === 'object') {
-      const socket = new ReconnectingWebSocket(path || getWsPath());
-      return new Connection(socket as Socket);
-    }
-  });
   const [connected, setConnected] = useState(false);
+  const connectionRef = useRef<Connection | null>(null);
 
   useEffect(() => {
-    if (!connection) {
+    if (!connectionRef.current && typeof window === 'object') {
       const socket = new ReconnectingWebSocket(path || getWsPath());
-      setConnection(new Connection(socket as Socket));
+      connectionRef.current = new Connection(socket as Socket);
     }
-  }, [connection, path]);
 
-  useEffect(() => {
+    const connection = connectionRef.current;
     if (!connection) {
       return;
     }
@@ -48,7 +46,7 @@ export const useConnection = (path?: string) => {
     let pingInterval: ReturnType<typeof setInterval>;
     const onConnected = () => {
       setConnected(true);
-      pingInterval = setInterval(() => connection.ping(), 1000 * 30);
+      pingInterval = setInterval(() => connection.ping(), 1000 * 10);
     };
     const onDisconnected = () => {
       setConnected(false);
@@ -65,6 +63,7 @@ export const useConnection = (path?: string) => {
     connection.on('closed', onDisconnected);
     connection.on('error', shareDbErrorHandler);
     connection.on('receive', onReceive);
+
     return () => {
       pingInterval && clearInterval(pingInterval);
       connection.removeListener('connected', onConnected);
@@ -72,10 +71,12 @@ export const useConnection = (path?: string) => {
       connection.removeListener('closed', onDisconnected);
       connection.removeListener('error', shareDbErrorHandler);
       connection.removeListener('receive', onReceive);
+      connection.close();
+      connectionRef.current = null;
     };
-  }, [connection]);
+  }, [path]);
 
   return useMemo(() => {
-    return { connection, connected };
-  }, [connected, connection]);
+    return { connection: connectionRef.current || undefined, connected };
+  }, [connected]);
 };

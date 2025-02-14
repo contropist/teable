@@ -1,7 +1,7 @@
 import type { ExecutionContext } from '@nestjs/common';
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { type PermissionAction } from '@teable/core';
+import { type Action } from '@teable/core';
 import { ClsService } from 'nestjs-cls';
 import type { IClsStore } from '../../../types/cls';
 import { IS_DISABLED_PERMISSION } from '../decorators/disabled-permission.decorator';
@@ -48,11 +48,18 @@ export class PermissionGuard {
     return true;
   }
 
-  protected async resourcePermission(
-    resourceId: string | undefined,
-    permissions: PermissionAction[]
-  ) {
+  private async permissionBaseReadAll() {
+    const accessTokenId = this.cls.get('accessTokenId');
+    if (accessTokenId) {
+      const { scopes } = await this.permissionService.getAccessToken(accessTokenId);
+      return scopes.includes('base|read_all');
+    }
+    return true;
+  }
+
+  protected async resourcePermission(resourceId: string | undefined, permissions: Action[]) {
     if (!resourceId) {
+      console.log('permissions', permissions);
       throw new ForbiddenException('permission check ID does not exist');
     }
     const accessTokenId = this.cls.get('accessTokenId');
@@ -65,11 +72,29 @@ export class PermissionGuard {
     return true;
   }
 
+  protected async instancePermissionChecker(action: Action) {
+    const isAdmin = this.cls.get('user.isAdmin');
+
+    if (!isAdmin) {
+      throw new ForbiddenException('User is not an admin');
+    }
+
+    const accessTokenId = this.cls.get('accessTokenId');
+    if (accessTokenId) {
+      const { scopes } = await this.permissionService.getAccessToken(accessTokenId);
+      const allowConfig = scopes.includes(action);
+      if (!allowConfig) {
+        throw new ForbiddenException(`Access token does not have ${action} permission`);
+      }
+    }
+    return true;
+  }
+
   protected async permissionCheck(context: ExecutionContext) {
-    const permissions = this.reflector.getAllAndOverride<PermissionAction[] | undefined>(
-      PERMISSIONS_KEY,
-      [context.getHandler(), context.getClass()]
-    );
+    const permissions = this.reflector.getAllAndOverride<Action[] | undefined>(PERMISSIONS_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
     const accessTokenId = this.cls.get('accessTokenId');
     if (accessTokenId && !permissions?.length) {
@@ -84,10 +109,20 @@ export class PermissionGuard {
     if (!permissions?.length) {
       return true;
     }
-    // space create permission check
+    // instance permission check
+    if (permissions?.includes('instance|update')) {
+      return this.instancePermissionChecker('instance|update');
+    }
+    if (permissions?.includes('instance|read')) {
+      return this.instancePermissionChecker('instance|read');
+    }
     if (permissions?.includes('space|create')) {
       return await this.permissionCreateSpace();
     }
+    if (permissions?.includes('base|read_all')) {
+      return await this.permissionBaseReadAll();
+    }
+
     // resource permission check
     return await this.resourcePermission(this.getResourceId(context), permissions);
   }

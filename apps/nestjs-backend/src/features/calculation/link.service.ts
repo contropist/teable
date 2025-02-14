@@ -11,7 +11,7 @@ import { createFieldInstanceByRaw } from '../field/model/factory';
 import type { LinkFieldDto } from '../field/model/field-dto/link-field.dto';
 import { SchemaType } from '../field/util';
 import { BatchService } from './batch.service';
-import type { ICellChange } from './utils/changes';
+import type { ICellChange, ICellContext } from './utils/changes';
 import { isLinkCellValue } from './utils/detect-link';
 
 export interface IFkRecordMap {
@@ -44,13 +44,6 @@ export interface ILinkCellContext {
   fieldId: string;
   newValue?: { id: string }[] | { id: string };
   oldValue?: { id: string }[] | { id: string };
-}
-
-export interface ICellContext {
-  recordId: string;
-  fieldId: string;
-  newValue?: unknown;
-  oldValue?: unknown;
 }
 
 @Injectable()
@@ -469,14 +462,16 @@ export class LinkService {
 
     const query = this.knex(fkHostTableName)
       .select({
-        id: `a.${selfKeyName}`,
-        foreignId: `b.${foreignKeyName}`,
+        id: selfKeyName,
+        foreignId: foreignKeyName,
       })
-      .from(this.knex.ref(fkHostTableName).as('a'))
-      .join(`${fkHostTableName} AS b`, `a.${selfKeyName}`, '=', `b.${selfKeyName}`)
-      .whereIn(`a.${foreignKeyName}`, linkRecordIds)
-      .whereNotNull(`a.${selfKeyName}`)
-      .whereNotNull(`b.${foreignKeyName}`)
+      .whereIn(selfKeyName, function () {
+        this.select(selfKeyName)
+          .from(fkHostTableName)
+          .whereIn(foreignKeyName, linkRecordIds)
+          .whereNotNull(selfKeyName);
+      })
+      .whereNotNull(foreignKeyName)
       .toQuery();
 
     return this.prismaService
@@ -546,6 +541,12 @@ export class LinkService {
       const foreignKeys = foreignKeysIndexed[id];
       if (relationship === Relationship.OneOne || relationship === Relationship.ManyOne) {
         const newCellValue = cellContext.newValue as ILinkCellValue | undefined;
+        if (Array.isArray(newCellValue)) {
+          throw new BadRequestException(
+            `CellValue of ${relationship} link field values cannot be an array`
+          );
+        }
+
         if ((foreignKeys?.length ?? 0) > 1) {
           throw new Error('duplicate foreign key from database');
         }
@@ -569,6 +570,12 @@ export class LinkService {
 
       if (relationship === Relationship.ManyMany || relationship === Relationship.OneMany) {
         const newCellValue = cellContext.newValue as ILinkCellValue[] | undefined;
+        if (newCellValue && !Array.isArray(newCellValue)) {
+          throw new BadRequestException(
+            `CellValue of ${relationship} link field values should be an array`
+          );
+        }
+
         const oldKey = foreignKeys?.map((key) => key.foreignId) ?? null;
         const newKey = newCellValue?.map((item) => item.id) ?? null;
 
@@ -811,7 +818,7 @@ export class LinkService {
     fromReset?: boolean
   ): Promise<{
     cellChanges: ICellChange[];
-    saveForeignKeyToDb: () => Promise<void>;
+    fkRecordMap: IFkRecordMap;
   }> {
     const fieldMap = fieldMapByTableId[tableId];
     const recordMapStruct = this.getRecordMapStruct(tableId, fieldMapByTableId, linkContexts);
@@ -839,12 +846,10 @@ export class LinkService {
       originRecordMapByTableId,
       updatedRecordMapByTableId
     );
-
+    await this.saveForeignKeyToDb(fieldMap, fkRecordMap);
     return {
       cellChanges,
-      saveForeignKeyToDb: async () => {
-        return this.saveForeignKeyToDb(fieldMapByTableId[tableId], fkRecordMap);
-      },
+      fkRecordMap,
     };
   }
 

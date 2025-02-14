@@ -1,34 +1,19 @@
 import type { IFieldVo } from '@teable/core';
-import { FieldType } from '@teable/core';
-import {
-  ArrowUpDown,
-  Filter as FilterIcon,
-  Share2,
-  Layers,
-  Settings,
-  PaintBucket,
-} from '@teable/icons';
+import { ArrowUpDown, Filter as FilterIcon, Share2, Layers, Settings, Plus } from '@teable/icons';
 import type { IFieldInstance, IFieldCreateOrSelectModalRef, KanbanView } from '@teable/sdk';
 import {
   Sort,
-  Filter,
+  ViewFilter,
   useFields,
   useTableId,
   VisibleFields,
   generateLocalId,
   FieldCreateOrSelectModal,
   useTablePermission,
+  CreateRecordModal,
 } from '@teable/sdk';
 import { useView } from '@teable/sdk/hooks/use-view';
-import {
-  Label,
-  Switch,
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-  cn,
-} from '@teable/ui-lib/shadcn';
+import { Button, Label, Switch, cn } from '@teable/ui-lib/shadcn';
 import { Trans, useTranslation } from 'next-i18next';
 import { useEffect, useMemo, useRef } from 'react';
 import { GUIDE_VIEW_FILTERING, GUIDE_VIEW_SORTING } from '@/components/Guide';
@@ -36,10 +21,8 @@ import { tableConfig } from '@/features/i18n/table.config';
 import { useToolbarChange } from '../../hooks/useToolbarChange';
 import { useKanbanStackCollapsedStore } from '../../kanban/store';
 import { ToolBarButton } from '../ToolBarButton';
-import { useViewFilterLinkContext } from '../useViewFilterLinkContext';
 import { CoverFieldSelect } from './CoverFieldSelect';
-
-const KANBAN_STACKED_BY_FIELD_TYPES = [FieldType.SingleSelect, FieldType.User];
+import { UndoRedoButtons } from './UndoRedoButtons';
 
 export const KanbanViewOperators: React.FC<{ disabled?: boolean }> = (props) => {
   const { disabled } = props;
@@ -50,7 +33,6 @@ export const KanbanViewOperators: React.FC<{ disabled?: boolean }> = (props) => 
   const { t } = useTranslation(tableConfig.i18nNamespaces);
   const { onFilterChange, onSortChange } = useToolbarChange();
   const { setCollapsedStackMap } = useKanbanStackCollapsedStore();
-  const viewFilerContext = useViewFilterLinkContext(tableId, view?.id, { disabled });
   const dialogRef = useRef<IFieldCreateOrSelectModalRef>(null);
 
   const { stackFieldId, coverFieldId, isCoverFit, isEmptyStackHidden, isFieldNameHidden } =
@@ -94,7 +76,20 @@ export const KanbanViewOperators: React.FC<{ disabled?: boolean }> = (props) => 
   if (!view) return null;
 
   return (
-    <div className="flex gap-1">
+    <div className="flex items-center gap-2">
+      <UndoRedoButtons />
+      <div className="mx-2 h-4 w-px shrink-0 bg-slate-200"></div>
+      <CreateRecordModal>
+        <Button
+          className="size-6 shrink-0 rounded-full p-0"
+          size={'xs'}
+          variant={'outline'}
+          disabled={!permission['record|create']}
+        >
+          <Plus className="size-4" />
+        </Button>
+      </CreateRecordModal>
+      <div className="mx-2 h-4 w-px shrink-0 bg-slate-200"></div>
       <FieldCreateOrSelectModal
         ref={dialogRef}
         title={t('table:kanban.toolbar.chooseStackingField')}
@@ -113,7 +108,6 @@ export const KanbanViewOperators: React.FC<{ disabled?: boolean }> = (props) => 
         }
         isCreatable={permission['field|create']}
         selectedFieldId={stackFieldId}
-        fieldTypes={KANBAN_STACKED_BY_FIELD_TYPES}
         onConfirm={onFieldSelected}
         getCreateBtnText={(fieldName) => (
           <Trans ns="table" i18nKey={'toolbar.createFieldButtonText'}>
@@ -172,7 +166,7 @@ export const KanbanViewOperators: React.FC<{ disabled?: boolean }> = (props) => 
           </ToolBarButton>
         )}
       </VisibleFields>
-      <Filter
+      <ViewFilter
         filters={view?.filter || null}
         onChange={onFilterChange}
         contentHeader={
@@ -183,9 +177,6 @@ export const KanbanViewOperators: React.FC<{ disabled?: boolean }> = (props) => 
             </div>
           )
         }
-        context={{
-          [FieldType.Link]: viewFilerContext,
-        }}
       >
         {(text, isActive) => (
           <ToolBarButton
@@ -203,7 +194,7 @@ export const KanbanViewOperators: React.FC<{ disabled?: boolean }> = (props) => 
             <FilterIcon className="size-4 text-sm" />
           </ToolBarButton>
         )}
-      </Filter>
+      </ViewFilter>
       <Sort sorts={view?.sort || null} onChange={onSortChange}>
         {(text: string, isActive) => (
           <ToolBarButton
@@ -222,18 +213,6 @@ export const KanbanViewOperators: React.FC<{ disabled?: boolean }> = (props) => 
           </ToolBarButton>
         )}
       </Sort>
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <ToolBarButton className="opacity-30" text="Color" textClassName="@2xl/toolbar:inline">
-              <PaintBucket className="size-4 text-sm" />
-            </ToolBarButton>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>{t('table:toolbar.comingSoon')}</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
     </div>
   );
 };

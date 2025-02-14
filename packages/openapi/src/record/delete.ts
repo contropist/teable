@@ -1,4 +1,6 @@
 import type { RouteConfig } from '@asteasolutions/zod-to-openapi';
+import type { IRecord } from '@teable/core';
+import type { AxiosResponse } from 'axios';
 import { axios } from '../axios';
 import { registerRoute, urlBuilder } from '../utils';
 import { z } from '../zod';
@@ -23,11 +25,9 @@ export const DeleteRecordRoute: RouteConfig = registerRoute({
   tags: ['record'],
 });
 
-export const deleteRecord = async (tableId: string, recordId: string) => {
-  return axios.delete<null>(
-    urlBuilder(DELETE_RECORD_URL, {
-      tableId,
-      recordId,
-    })
-  );
-};
+export async function deleteRecord(
+  tableId: string,
+  recordId: string
+): Promise<AxiosResponse<IRecord>> {
+  return axios.delete<IRecord>(urlBuilder(DELETE_RECORD_URL, { tableId, recordId }));
+}

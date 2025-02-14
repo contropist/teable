@@ -9,6 +9,7 @@
     "module": "esnext",
     "jsx": "preserve",
     "incremental": true,
+    "moduleResolution": "Bundler",
     "paths": {
       "@/test-utils": ["../config/tests/test-utils"],
       "@/config/*": ["./config/*"],
@@ -30,14 +31,14 @@
       "@teable/db-main-prisma": ["../../../packages/db-main-prisma/src/index"],
       "@teable/core": ["../../../packages/core/src/index"],
       "@teable/openapi": ["../../../packages/openapi/src/index"],
-      "@teable/icons": ["../../../packages/icons/src/index"],
+      "@teable/icons": ["../../../packages/icons/src/index"]
     },
     "plugins": [
       {
-        "name": "next",
-      },
+        "name": "next"
+      }
     ],
-    "types": ["vitest/globals"],
+    "types": ["vitest/globals"]
   },
   "exclude": ["**/node_modules", "**/.*/"],
   "include": [
@@ -50,6 +51,6 @@
     "**/*.mjs",
     "**/*.jsx",
     "**/*.json",
-    ".next/types/**/*.ts",
-  ],
+    ".next/types/**/*.ts"
+  ]
 }

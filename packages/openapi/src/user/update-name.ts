@@ -1,6 +1,6 @@
 import type { RouteConfig } from '@asteasolutions/zod-to-openapi';
 import { axios } from '../axios';
-import { registerRoute, urlBuilder } from '../utils';
+import { registerRoute } from '../utils';
 import { z } from '../zod';
 
 export const UPDATE_USER_NAME = '/user/name';
@@ -33,5 +33,5 @@ export const UpdateUserNameRoute: RouteConfig = registerRoute({
 });
 
 export const updateUserName = async (updateUserNameRo: IUpdateUserNameRo) => {
-  return axios.patch<void>(urlBuilder(UPDATE_USER_NAME), updateUserNameRo);
+  return axios.patch<void>(UPDATE_USER_NAME, updateUserNameRo);
 };

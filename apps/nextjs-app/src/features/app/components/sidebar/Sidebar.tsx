@@ -26,7 +26,7 @@ export const Sidebar: FC<PropsWithChildren<ISidebarProps>> = (props) => {
     <>
       {isMobile ? (
         <SheetWrapper>
-          <div className="flex size-full flex-col overflow-hidden bg-popover p-5">
+          <div className="group/sidebar flex size-full flex-col overflow-hidden bg-popover p-5">
             <SidebarHeader headerLeft={headerLeft} />
             {children}
           </div>
@@ -37,8 +37,9 @@ export const Sidebar: FC<PropsWithChildren<ISidebarProps>> = (props) => {
             'overflow-hidden': !leftVisible,
             'w-72': leftVisible,
           })}
+          onContextMenu={(e) => e.preventDefault()}
         >
-          <div className="flex size-full flex-col overflow-hidden bg-popover">
+          <div className="group/sidebar flex size-full flex-col overflow-hidden bg-popover">
             <SidebarHeader headerLeft={headerLeft} onExpand={() => setLeftVisible(!leftVisible)} />
             {leftVisible && children}
           </div>
@@ -49,7 +50,7 @@ export const Sidebar: FC<PropsWithChildren<ISidebarProps>> = (props) => {
         <HoverWrapper size={SIDE_BAR_WIDTH}>
           <HoverWrapper.Trigger>
             <Button
-              className={cn('absolute top-7 p-1 rounded-none -left-0 rounded-r-full z-[51]')}
+              className={cn('absolute top-7 p-1 rounded-none -left-0 rounded-r-full z-40')}
               variant={'outline'}
               size="xs"
               onClick={() => {
@@ -60,7 +61,10 @@ export const Sidebar: FC<PropsWithChildren<ISidebarProps>> = (props) => {
             </Button>
           </HoverWrapper.Trigger>
           <HoverWrapper.content>
-            <div className="flex size-full flex-col overflow-hidden bg-popover">
+            <div
+              className="group/sidebar flex size-full flex-col overflow-hidden bg-popover"
+              onContextMenu={(e) => e.preventDefault()}
+            >
               <SidebarHeader headerLeft={headerLeft} />
               {children}
             </div>

@@ -1,6 +1,7 @@
 import type { RouteConfig } from '@asteasolutions/zod-to-openapi';
 import type { IRecord } from '@teable/core';
 import { recordSchema } from '@teable/core';
+import type { AxiosResponse } from 'axios';
 import { axios } from '../axios';
 import { registerRoute, urlBuilder } from '../utils';
 import { z } from '../zod';
@@ -72,16 +73,10 @@ export const UpdateRecordRoute: RouteConfig = registerRoute({
   tags: ['record'],
 });
 
-export const updateRecord = async (
+export async function updateRecord(
   tableId: string,
   recordId: string,
   recordRo: IUpdateRecordRo
-) => {
-  return axios.patch<IRecord>(
-    urlBuilder(UPDATE_RECORD, {
-      tableId,
-      recordId,
-    }),
-    recordRo
-  );
-};
+): Promise<AxiosResponse<IRecord>> {
+  return axios.patch<IRecord>(urlBuilder(UPDATE_RECORD, { tableId, recordId }), recordRo);
+}

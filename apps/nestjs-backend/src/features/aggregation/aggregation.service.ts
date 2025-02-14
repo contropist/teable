@@ -1,15 +1,23 @@
-import { Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
-import type { IGridColumnMeta, IFilter } from '@teable/core';
+/* eslint-disable sonarjs/no-duplicate-string */
 import {
+  BadGatewayException,
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
+import type { IGridColumnMeta, IFilter, IGroup } from '@teable/core';
+import {
+  CellValueType,
+  identify,
+  IdPrefix,
   mergeWithDefaultFilter,
   nullsToUndefined,
-  parseGroup,
   StatisticsFunc,
   ViewType,
 } from '@teable/core';
 import type { Prisma } from '@teable/db-main-prisma';
 import { PrismaService } from '@teable/db-main-prisma';
-import { GroupPointType } from '@teable/openapi';
 import type {
   IAggregationField,
   IGetRecordsRo,
@@ -17,26 +25,31 @@ import type {
   IRawAggregations,
   IRawAggregationValue,
   IRawRowCountValue,
-  IGroupPoint,
   IGroupPointsRo,
+  ICalendarDailyCollectionRo,
+  ICalendarDailyCollectionVo,
+  ISearchIndexByQueryRo,
+  ISearchCountRo,
 } from '@teable/openapi';
 import dayjs from 'dayjs';
 import { Knex } from 'knex';
-import { groupBy, isDate, isEmpty } from 'lodash';
+import { get, groupBy, isDate, isEmpty, isString, keyBy } from 'lodash';
 import { InjectModel } from 'nest-knexjs';
 import { ClsService } from 'nestjs-cls';
 import { IThresholdConfig, ThresholdConfig } from '../../configs/threshold.config';
 import { InjectDbProvider } from '../../db-provider/db.provider';
 import { IDbProvider } from '../../db-provider/db.provider.interface';
 import type { IClsStore } from '../../types/cls';
-import { string2Hash } from '../../utils';
-import { Timing } from '../../utils/timing';
+import { convertValueToStringify, string2Hash } from '../../utils';
 import type { IFieldInstance } from '../field/model/factory';
 import { createFieldInstanceByRaw } from '../field/model/factory';
+import type { DateFieldDto } from '../field/model/field-dto/date-field.dto';
 import { RecordService } from '../record/record.service';
+import { TableIndexService } from '../table/table-index.service';
 
 export type IWithView = {
   viewId?: string;
+  groupBy?: IGroup;
   customFilter?: IFilter;
   customFieldStats?: ICustomFieldStats[];
 };
@@ -58,6 +71,7 @@ export class AggregationService {
 
   constructor(
     private readonly recordService: RecordService,
+    private readonly tableIndexService: TableIndexService,
     private readonly prisma: PrismaService,
     @InjectModel('CUSTOM_KNEX') private readonly knex: Knex,
     @InjectDbProvider() private readonly dbProvider: IDbProvider,
@@ -69,7 +83,7 @@ export class AggregationService {
     tableId: string;
     withFieldIds?: string[];
     withView?: IWithView;
-    search?: [string, string];
+    search?: [string, string?, boolean?];
   }): Promise<IRawAggregationValue> {
     const { tableId, withFieldIds, withView, search } = params;
     // Retrieve the current user's ID to build user-related query conditions
@@ -84,14 +98,17 @@ export class AggregationService {
     const dbTableName = await this.getDbTableName(this.prisma, tableId);
 
     const { filter, statisticFields } = statisticsData;
+    const groupBy = withView?.groupBy;
 
     const rawAggregationData = await this.handleAggregation({
       dbTableName,
       fieldInstanceMap,
+      tableId,
       filter,
       search,
       statisticFields,
       withUserId: currentUserId,
+      withView,
     });
 
     const aggregationResult = rawAggregationData && rawAggregationData[0];
@@ -111,18 +128,122 @@ export class AggregationService {
         }
       }
     }
-    return { aggregations };
+
+    const aggregationsWithGroup = await this.performGroupedAggregation({
+      aggregations,
+      statisticFields,
+      tableId,
+      filter,
+      search,
+      groupBy,
+      dbTableName,
+      fieldInstanceMap,
+      withView,
+    });
+
+    return { aggregations: aggregationsWithGroup };
+  }
+
+  async performGroupedAggregation(params: {
+    aggregations: IRawAggregations;
+    statisticFields: IAggregationField[] | undefined;
+    tableId: string;
+    filter?: IFilter;
+    search?: [string, string?, boolean?];
+    groupBy?: IGroup;
+    dbTableName: string;
+    fieldInstanceMap: Record<string, IFieldInstance>;
+    withView?: IWithView;
+  }) {
+    const {
+      dbTableName,
+      aggregations,
+      statisticFields,
+      filter,
+      groupBy,
+      search,
+      fieldInstanceMap,
+      withView,
+      tableId,
+    } = params;
+
+    if (!groupBy || !statisticFields) return aggregations;
+
+    const currentUserId = this.cls.get('user.id');
+    const aggregationByFieldId = keyBy(aggregations, 'fieldId');
+
+    const groupByFields = groupBy.map(({ fieldId }) => {
+      return {
+        fieldId,
+        dbFieldName: fieldInstanceMap[fieldId].dbFieldName,
+      };
+    });
+
+    for (let i = 0; i < groupBy.length; i++) {
+      const rawGroupedAggregationData = (await this.handleAggregation({
+        dbTableName,
+        fieldInstanceMap,
+        tableId,
+        filter,
+        groupBy: groupBy.slice(0, i + 1),
+        search,
+        statisticFields,
+        withUserId: currentUserId,
+        withView,
+      }))!;
+
+      const currentGroupFieldId = groupByFields[i].fieldId;
+
+      for (const groupedAggregation of rawGroupedAggregationData) {
+        const groupByValueString = groupByFields
+          .slice(0, i + 1)
+          .map(({ dbFieldName }) => {
+            const groupByValue = groupedAggregation[dbFieldName];
+            return convertValueToStringify(groupByValue);
+          })
+          .join('_');
+        const flagString = `${currentGroupFieldId}_${groupByValueString}`;
+        const groupId = String(string2Hash(flagString));
+
+        for (const statisticField of statisticFields) {
+          const { fieldId, statisticFunc } = statisticField;
+          const aggKey = `${fieldId}_${statisticFunc}`;
+          const curFieldAggregation = aggregationByFieldId[fieldId]!;
+          const convertValue = this.formatConvertValue(groupedAggregation[aggKey], statisticFunc);
+
+          if (!curFieldAggregation.group) {
+            aggregationByFieldId[fieldId].group = {
+              [groupId]: { value: convertValue, aggFunc: statisticFunc },
+            };
+          } else {
+            aggregationByFieldId[fieldId]!.group![groupId] = {
+              value: convertValue,
+              aggFunc: statisticFunc,
+            };
+          }
+        }
+      }
+    }
+
+    return Object.values(aggregationByFieldId);
   }
 
   async performRowCount(tableId: string, queryRo: IQueryBaseRo): Promise<IRawRowCountValue> {
-    const { filterLinkCellCandidate, filterLinkCellSelected } = queryRo;
+    const {
+      viewId,
+      ignoreViewQuery,
+      filterLinkCellCandidate,
+      filterLinkCellSelected,
+      selectedRecordIds,
+      search,
+    } = queryRo;
     // Retrieve the current user's ID to build user-related query conditions
     const currentUserId = this.cls.get('user.id');
 
     const { statisticsData, fieldInstanceMap } = await this.fetchStatisticsParams({
       tableId,
       withView: {
-        viewId: queryRo.viewId,
+        viewId: ignoreViewQuery ? undefined : viewId,
         customFilter: queryRo.filter,
       },
     });
@@ -138,8 +259,10 @@ export class AggregationService {
       filter,
       filterLinkCellCandidate,
       filterLinkCellSelected,
-      search: queryRo.search,
+      selectedRecordIds,
+      search,
       withUserId: currentUserId,
+      viewId: queryRo?.viewId,
     });
 
     return {
@@ -167,6 +290,7 @@ export class AggregationService {
     );
 
     const statisticsData = this.buildStatisticsData(filteredFieldInstances, viewRaw, withView);
+
     return { statisticsData, fieldInstanceMap };
   }
 
@@ -177,11 +301,26 @@ export class AggregationService {
 
     return nullsToUndefined(
       await this.prisma.view.findFirst({
-        select: { id: true, columnMeta: true, filter: true, group: true },
+        select: {
+          id: true,
+          type: true,
+          filter: true,
+          group: true,
+          options: true,
+          columnMeta: true,
+        },
         where: {
           tableId,
           ...(withView?.viewId ? { id: withView.viewId } : {}),
-          type: { in: [ViewType.Grid, ViewType.Gantt, ViewType.Kanban] },
+          type: {
+            in: [
+              ViewType.Grid,
+              ViewType.Gantt,
+              ViewType.Kanban,
+              ViewType.Gallery,
+              ViewType.Calendar,
+            ],
+          },
           deletedTime: null,
         },
       })
@@ -233,7 +372,7 @@ export class AggregationService {
     return statisticsData;
   }
 
-  async getFieldsData(tableId: string, fieldIds?: string[]) {
+  async getFieldsData(tableId: string, fieldIds?: string[], withName?: boolean) {
     const fieldsRaw = await this.prisma.field.findMany({
       where: { tableId, ...(fieldIds ? { id: { in: fieldIds } } : {}), deletedTime: null },
     });
@@ -242,7 +381,9 @@ export class AggregationService {
     const fieldInstanceMap = fieldInstances.reduce(
       (map, field) => {
         map[field.id] = field;
-        map[field.name] = field;
+        if (withName || withName === undefined) {
+          map[field.name] = field;
+        }
         return map;
       },
       {} as Record<string, IFieldInstance>
@@ -287,37 +428,69 @@ export class AggregationService {
     return calculatedStatisticFields;
   }
 
-  private handleAggregation(params: {
+  private async handleAggregation(params: {
     dbTableName: string;
     fieldInstanceMap: Record<string, IFieldInstance>;
+    tableId: string;
     filter?: IFilter;
-    search?: [string, string];
+    groupBy?: IGroup;
+    search?: [string, string?, boolean?];
     statisticFields?: IAggregationField[];
     withUserId?: string;
+    withView?: IWithView;
   }) {
-    const { dbTableName, fieldInstanceMap, filter, search, statisticFields, withUserId } = params;
+    const {
+      dbTableName,
+      fieldInstanceMap,
+      filter,
+      search,
+      statisticFields,
+      withUserId,
+      groupBy,
+      withView,
+      tableId,
+    } = params;
+
     if (!statisticFields?.length) {
       return;
     }
 
+    const { viewId } = withView || {};
+
+    const searchFields = await this.recordService.getSearchFields(fieldInstanceMap, search, viewId);
+
     const tableAlias = 'main_table';
     const queryBuilder = this.knex
-      .with(tableAlias, (qb) => {
+      .with(tableAlias, async (qb) => {
         qb.select('*').from(dbTableName);
         if (filter) {
           this.dbProvider
             .filterQuery(qb, fieldInstanceMap, filter, { withUserId })
             .appendQueryBuilder();
         }
-        if (search) {
-          this.dbProvider.searchQuery(qb, fieldInstanceMap, search);
+        if (search && search[2]) {
+          const tableIndex = await this.tableIndexService.getActivatedTableIndexes(tableId);
+          qb.where((builder) => {
+            this.dbProvider.searchQuery(builder, searchFields, tableIndex, search);
+          });
         }
       })
       .from(tableAlias);
 
-    const aggSql = this.dbProvider
+    const qb = this.dbProvider
       .aggregationQuery(queryBuilder, tableAlias, fieldInstanceMap, statisticFields)
-      .toQuerySql();
+      .appendBuilder();
+
+    if (groupBy) {
+      this.dbProvider
+        .groupQuery(
+          qb,
+          fieldInstanceMap,
+          groupBy.map((item) => item.fieldId)
+        )
+        .appendGroupBuilder();
+    }
+    const aggSql = qb.toQuery();
     return this.prisma.$queryRawUnsafe<{ [field: string]: unknown }[]>(aggSql);
   }
 
@@ -328,8 +501,10 @@ export class AggregationService {
     filter?: IFilter;
     filterLinkCellCandidate?: IGetRecordsRo['filterLinkCellCandidate'];
     filterLinkCellSelected?: IGetRecordsRo['filterLinkCellSelected'];
-    search?: [string, string];
+    selectedRecordIds?: IGetRecordsRo['selectedRecordIds'];
+    search?: [string, string?, boolean?];
     withUserId?: string;
+    viewId?: string;
   }) {
     const {
       tableId,
@@ -338,8 +513,10 @@ export class AggregationService {
       filter,
       filterLinkCellCandidate,
       filterLinkCellSelected,
+      selectedRecordIds,
       search,
       withUserId,
+      viewId,
     } = params;
 
     const queryBuilder = this.knex(dbTableName);
@@ -350,8 +527,22 @@ export class AggregationService {
         .appendQueryBuilder();
     }
 
-    if (search) {
-      this.dbProvider.searchQuery(queryBuilder, fieldInstanceMap, search);
+    if (search && search[2]) {
+      const searchFields = await this.recordService.getSearchFields(
+        fieldInstanceMap,
+        search,
+        viewId
+      );
+      const tableIndex = await this.tableIndexService.getActivatedTableIndexes(tableId);
+      queryBuilder.where((builder) => {
+        this.dbProvider.searchQuery(builder, searchFields, tableIndex, search);
+      });
+    }
+
+    if (selectedRecordIds) {
+      filterLinkCellCandidate
+        ? queryBuilder.whereNotIn(`${dbTableName}.__id`, selectedRecordIds)
+        : queryBuilder.whereIn(`${dbTableName}.__id`, selectedRecordIds);
     }
 
     if (filterLinkCellCandidate) {
@@ -437,114 +628,283 @@ export class AggregationService {
     return prisma.$queryRawUnsafe<{ count?: number }[]>(rowCountSql.toQuery());
   }
 
-  private convertValueToStringify(value: unknown): number | string | null {
-    if (typeof value === 'bigint' || typeof value === 'number') {
-      return Number(value);
-    }
-    if (isDate(value)) {
-      return value.toISOString();
-    }
-    if (typeof value === 'string') {
-      return value;
-    }
-    if (value == null) return null;
-    return JSON.stringify(value);
-  }
-
-  @Timing()
-  private groupDbCollection2GroupPoints(
-    groupResult: { [key: string]: unknown; __c: number }[],
-    groupFields: IFieldInstance[]
-  ) {
-    const groupPoints: IGroupPoint[] = [];
-    let fieldValues: unknown[] = [Symbol(), Symbol(), Symbol()];
-
-    groupResult.forEach((item) => {
-      const { __c: count } = item;
-
-      groupFields.forEach((field, index) => {
-        const { id, dbFieldName } = field;
-        const fieldValue = this.convertValueToStringify(item[dbFieldName]);
-
-        if (fieldValues[index] === fieldValue) return;
-
-        fieldValues[index] = fieldValue;
-        fieldValues = fieldValues.map((value, idx) => (idx > index ? Symbol() : value));
-
-        const flagString = `${id}_${fieldValues.slice(0, index + 1).join('_')}`;
-
-        groupPoints.push({
-          id: String(string2Hash(flagString)),
-          type: GroupPointType.Header,
-          depth: index,
-          value: field.convertDBValue2CellValue(fieldValue),
-        });
-      });
-
-      groupPoints.push({ type: GroupPointType.Row, count: Number(count) });
-    });
+  public async getGroupPoints(tableId: string, query?: IGroupPointsRo) {
+    const { groupPoints } = await this.recordService.getGroupRelatedData(tableId, query);
     return groupPoints;
   }
 
-  public async getGroupPoints(tableId: string, query?: IGroupPointsRo) {
-    const { viewId, groupBy: extraGroupBy, filter, search } = query || {};
+  public async getSearchCount(tableId: string, queryRo: ISearchCountRo, projection?: string[]) {
+    const { search, viewId, ignoreViewQuery } = queryRo;
+    const dbFieldName = await this.getDbTableName(this.prisma, tableId);
+    const { fieldInstanceMap } = await this.getFieldsData(tableId, undefined, false);
 
-    const groupBy = parseGroup(extraGroupBy);
+    if (!search) {
+      throw new BadRequestException('Search query is required');
+    }
 
-    if (!groupBy?.length) return null;
+    const searchFields = await this.recordService.getSearchFields(
+      fieldInstanceMap,
+      search,
+      ignoreViewQuery ? undefined : viewId,
+      projection
+    );
 
-    const viewRaw = await this.findView(tableId, { viewId });
-    const { fieldInstanceMap } = await this.getFieldsData(tableId);
+    if (searchFields?.length === 0) {
+      return { count: 0 };
+    }
+    const tableIndex = await this.tableIndexService.getActivatedTableIndexes(tableId);
+    const queryBuilder = this.knex(dbFieldName);
+    this.dbProvider.searchCountQuery(queryBuilder, searchFields, search, tableIndex);
+    this.dbProvider
+      .filterQuery(queryBuilder, fieldInstanceMap, queryRo?.filter, {
+        withUserId: this.cls.get('user.id'),
+      })
+      .appendQueryBuilder();
+
+    const sql = queryBuilder.toQuery();
+
+    const result = await this.prisma.$queryRawUnsafe<{ count: number }[] | null>(sql);
+
+    return {
+      count: result ? Number(result[0]?.count) : 0,
+    };
+  }
+
+  public async getRecordIndexBySearchOrder(
+    tableId: string,
+    queryRo: ISearchIndexByQueryRo,
+    projection?: string[]
+  ) {
+    const { search, take, skip, orderBy, filter, groupBy, viewId, ignoreViewQuery } = queryRo;
     const dbTableName = await this.getDbTableName(this.prisma, tableId);
+    const { fieldInstanceMap } = await this.getFieldsData(tableId, undefined, false);
 
+    if (take > 1000) {
+      throw new BadGatewayException('The maximum search index result is 1000');
+    }
+
+    if (!search) {
+      throw new BadRequestException('Search query is required');
+    }
+
+    const searchFields = await this.recordService.getSearchFields(
+      fieldInstanceMap,
+      search,
+      ignoreViewQuery ? undefined : viewId,
+      projection
+    );
+
+    if (searchFields.length === 0) {
+      return null;
+    }
+
+    const { queryBuilder: viewRecordsQB } = await this.recordService.buildFilterSortQuery(
+      tableId,
+      queryRo
+    );
+
+    const basicSortIndex = await this.recordService.getBasicOrderIndexField(dbTableName, viewId);
+
+    const filterQuery = (qb: Knex.QueryBuilder) => {
+      this.dbProvider
+        .filterQuery(qb, fieldInstanceMap, filter, {
+          withUserId: this.cls.get('user.id'),
+        })
+        .appendQueryBuilder();
+    };
+
+    const sortQuery = (qb: Knex.QueryBuilder) => {
+      this.dbProvider
+        .sortQuery(qb, fieldInstanceMap, [...(groupBy ?? []), ...(orderBy ?? [])])
+        .appendSortBuilder();
+    };
+
+    const tableIndex = await this.tableIndexService.getActivatedTableIndexes(tableId);
+
+    const queryBuilder = this.dbProvider.searchIndexQuery(
+      this.knex.queryBuilder(),
+      dbTableName,
+      searchFields,
+      queryRo,
+      tableIndex,
+      basicSortIndex,
+      filterQuery,
+      sortQuery
+    );
+
+    const sql = queryBuilder.toQuery();
+
+    const result = await this.prisma.$queryRawUnsafe<{ __id: string; fieldId: string }[]>(sql);
+
+    // no result found
+    if (result?.length === 0) {
+      return null;
+    }
+
+    const recordIds = result;
+
+    if (search[2]) {
+      const baseSkip = skip ?? 0;
+      const accRecord: string[] = [];
+      return recordIds.map((rec) => {
+        if (!accRecord?.includes(rec.__id)) {
+          accRecord.push(rec.__id);
+        }
+        return {
+          index: baseSkip + accRecord?.length,
+          fieldId: rec.fieldId,
+          recordId: rec.__id,
+        };
+      });
+    }
+
+    // step 2. find the index in current view
+    const indexQueryBuilder = this.knex
+      .select('row_num')
+      .select('__id')
+      .from((qb: Knex.QueryBuilder) => {
+        qb.select('__id')
+          .select(this.knex.client.raw('ROW_NUMBER() OVER () as row_num'))
+          .from(viewRecordsQB.as('t'))
+          .as('t1');
+      })
+      .whereIn('__id', [...new Set(recordIds.map((record) => record.__id))]);
+
+    // eslint-disable-next-line
+    const indexResult = await this.prisma.$queryRawUnsafe<{ row_num: number; __id: string }[]>(
+      indexQueryBuilder.toQuery()
+    );
+
+    if (indexResult?.length === 0) {
+      return null;
+    }
+
+    const indexResultMap = keyBy(indexResult, '__id');
+
+    return result.map((item) => {
+      const index = Number(indexResultMap[item.__id]?.row_num);
+      if (isNaN(index)) {
+        throw new Error('Index not found');
+      }
+      return {
+        index,
+        fieldId: item.fieldId,
+        recordId: item.__id,
+      };
+    });
+  }
+
+  public async getCalendarDailyCollection(
+    tableId: string,
+    query: ICalendarDailyCollectionRo
+  ): Promise<ICalendarDailyCollectionVo> {
+    const {
+      startDate,
+      endDate,
+      startDateFieldId,
+      endDateFieldId,
+      filter,
+      search,
+      ignoreViewQuery,
+    } = query;
+
+    if (identify(tableId) !== IdPrefix.Table) {
+      throw new InternalServerErrorException('query collection must be table id');
+    }
+
+    const dbTableName = await this.getDbTableName(this.prisma, tableId);
+    const fields = await this.recordService.getFieldsByProjection(tableId);
+    const fieldMap = fields.reduce(
+      (map, field) => {
+        map[field.id] = field;
+        return map;
+      },
+      {} as Record<string, IFieldInstance>
+    );
+
+    const startField = fieldMap[startDateFieldId];
+
+    if (
+      !startField ||
+      startField.cellValueType !== CellValueType.DateTime ||
+      startField.isMultipleCellValue
+    ) {
+      throw new BadRequestException('Invalid start date field id');
+    }
+
+    const endField = endDateFieldId ? fieldMap[endDateFieldId] : startField;
+
+    if (
+      !endField ||
+      endField.cellValueType !== CellValueType.DateTime ||
+      endField.isMultipleCellValue
+    ) {
+      throw new BadRequestException('Invalid end date field id');
+    }
+
+    const viewId = ignoreViewQuery ? undefined : query.viewId;
+    const queryBuilder = this.knex(dbTableName);
+    const viewRaw = await this.findView(tableId, { viewId });
     const filterStr = viewRaw?.filter;
     const mergedFilter = mergeWithDefaultFilter(filterStr, filter);
-    const groupFieldIds = groupBy.map((item) => item.fieldId);
-
-    const queryBuilder = this.knex(dbTableName);
-    const distinctQueryBuilder = this.knex(dbTableName);
+    const currentUserId = this.cls.get('user.id');
 
     if (mergedFilter) {
-      const withUserId = this.cls.get('user.id');
       this.dbProvider
-        .filterQuery(queryBuilder, fieldInstanceMap, mergedFilter, { withUserId })
-        .appendQueryBuilder();
-      this.dbProvider
-        .filterQuery(distinctQueryBuilder, fieldInstanceMap, mergedFilter, { withUserId })
+        .filterQuery(queryBuilder, fieldMap, mergedFilter, { withUserId: currentUserId })
         .appendQueryBuilder();
     }
 
     if (search) {
-      this.dbProvider.searchQuery(queryBuilder, fieldInstanceMap, search);
-      this.dbProvider.searchQuery(distinctQueryBuilder, fieldInstanceMap, search);
-    }
-
-    this.dbProvider
-      .groupQuery(distinctQueryBuilder, fieldInstanceMap, groupFieldIds, { isDistinct: true })
-      .appendGroupBuilder();
-    const distinctResult = await this.prisma.$queryRawUnsafe<{ count: number }[]>(
-      distinctQueryBuilder.toQuery()
-    );
-    const distinctCount = Number(distinctResult[0].count);
-
-    if (distinctCount > this.thresholdConfig.maxGroupPoints) {
-      throw new PayloadTooLargeException(
-        'Grouping results exceed limit, please adjust grouping conditions to reduce the number of groups.'
+      const searchFields = await this.recordService.getSearchFields(
+        fieldMap,
+        search,
+        query?.viewId
       );
+      const tableIndex = await this.tableIndexService.getActivatedTableIndexes(tableId);
+      queryBuilder.where((builder) => {
+        this.dbProvider.searchQuery(builder, searchFields, tableIndex, search);
+      });
     }
 
-    this.dbProvider.sortQuery(queryBuilder, fieldInstanceMap, groupBy).appendSortBuilder();
-    this.dbProvider.groupQuery(queryBuilder, fieldInstanceMap, groupFieldIds).appendGroupBuilder();
+    this.dbProvider.calendarDailyCollectionQuery(queryBuilder, {
+      startDate,
+      endDate,
+      startField: startField as DateFieldDto,
+      endField: endField as DateFieldDto,
+    });
 
-    queryBuilder.count({ __c: '*' });
+    const result = await this.prisma
+      .txClient()
+      .$queryRawUnsafe<
+        { date: Date | string; count: number; ids: string[] | string }[]
+      >(queryBuilder.toQuery());
 
-    const groupSql = queryBuilder.toQuery();
+    const countMap = result.reduce(
+      (map, item) => {
+        const key = isString(item.date) ? item.date : item.date.toISOString().split('T')[0];
+        map[key] = Number(item.count);
+        return map;
+      },
+      {} as Record<string, number>
+    );
+    let recordIds = result
+      .map((item) => (isString(item.ids) ? item.ids.split(',') : item.ids))
+      .flat();
+    recordIds = Array.from(new Set(recordIds));
 
-    const result =
-      await this.prisma.$queryRawUnsafe<{ [key: string]: unknown; __c: number }[]>(groupSql);
+    if (!recordIds.length) {
+      return {
+        countMap,
+        records: [],
+      };
+    }
 
-    const groupFields = groupFieldIds.map((fieldId) => fieldInstanceMap[fieldId]);
+    const { records } = await this.recordService.getRecordsById(tableId, recordIds);
 
-    return this.groupDbCollection2GroupPoints(result, groupFields);
+    return {
+      countMap,
+      records,
+    };
   }
 }

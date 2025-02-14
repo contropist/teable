@@ -26,7 +26,7 @@ import {
   USER_FIELD_CASES,
   USER_LOOKUP_FIELD_CASES,
 } from './data-helpers/caces/record-filter-query';
-import { createTable, deleteTable, initApp } from './utils/init-app';
+import { createTable, permanentDeleteTable, initApp } from './utils/init-app';
 
 const testDesc = `should filter [$operator], query value: $queryValue, expect result length: $expectResultLength`;
 
@@ -84,7 +84,7 @@ describe('OpenAPI Record-Filter-Query (e2e)', () => {
       conjunction,
     };
 
-    const { records } = await getFilterRecord(tableId, viewId, filter);
+    const { records } = await getFilterRecord(tableId, viewId!, filter);
     expect(records.length).toBe(expectResultLength);
     if (!expectMoreResults) {
       expect(records).not.toMatchObject([
@@ -107,7 +107,7 @@ describe('OpenAPI Record-Filter-Query (e2e)', () => {
       });
     });
     afterAll(async () => {
-      await deleteTable(baseId, table.id);
+      await permanentDeleteTable(baseId, table.id);
     });
 
     describe('simple filter text field record', () => {
@@ -171,8 +171,8 @@ describe('OpenAPI Record-Filter-Query (e2e)', () => {
     });
 
     afterAll(async () => {
-      await deleteTable(baseId, table.id);
-      await deleteTable(baseId, subTable.id);
+      await permanentDeleteTable(baseId, table.id);
+      await permanentDeleteTable(baseId, subTable.id);
     });
 
     describe('filter lookup text field record', () => {

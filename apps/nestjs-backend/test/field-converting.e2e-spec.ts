@@ -5,8 +5,10 @@ import type {
   IFieldVo,
   ILinkFieldOptions,
   ILookupOptionsRo,
+  IRecord,
   IRollupFieldOptions,
   ISelectFieldOptions,
+  IUserCellValue,
 } from '@teable/core';
 import {
   Relationship,
@@ -23,8 +25,9 @@ import {
   DateFormattingPreset,
   generateFieldId,
   DriverClient,
+  CellFormat,
 } from '@teable/core';
-import type { ITableFullVo } from '@teable/openapi';
+import { type ITableFullVo } from '@teable/openapi';
 import {
   getRecords,
   createField,
@@ -36,7 +39,7 @@ import {
   deleteRecord,
   updateRecordByApi,
   createTable,
-  deleteTable,
+  permanentDeleteTable,
   deleteRecords,
 } from './utils/init-app';
 
@@ -64,9 +67,9 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
     });
 
     afterEach(async () => {
-      await deleteTable(baseId, table1.id);
-      await deleteTable(baseId, table2.id);
-      await deleteTable(baseId, table3.id);
+      await permanentDeleteTable(baseId, table1.id);
+      await permanentDeleteTable(baseId, table2.id);
+      await permanentDeleteTable(baseId, table3.id);
     });
   };
 
@@ -96,9 +99,11 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
     }
     await convertField(table.id, sourceField.id, newFieldRo);
     const newField = await getField(table.id, sourceField.id);
-    const records = await Promise.all(
-      values.map((_, i) => getRecord(table.id, table.records[i].id))
-    );
+    const records: IRecord[] = [];
+    for (let i = 0; i < values.length; i++) {
+      const record = await getRecord(table.id, table.records[i].id);
+      records.push(record);
+    }
 
     const result = records.map((record) => record.fields[newField.id]);
     return {
@@ -111,7 +116,7 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
 
   describe('modify general property', () => {
     bfAf();
-    it('should modify field name', async () => {
+    it('should modify field name and prevent name duplicate', async () => {
       const sourceFieldRo: IFieldRo = {
         name: 'TextField',
         description: 'hello',
@@ -125,6 +130,59 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
       const { newField } = await expectUpdate(table1, sourceFieldRo, newFieldRo);
       expect(newField.name).toEqual('New Name');
       expect(newField.description).toEqual('hello');
+
+      await expect(
+        convertField(table1.id, table1.fields[0].id, {
+          name: 'New Name',
+          type: FieldType.SingleLineText,
+        })
+      ).rejects.toThrow();
+    });
+
+    it('should modify options showAs', async () => {
+      const sourceFieldRo: IFieldRo = {
+        name: 'TextField',
+        description: 'hello',
+        type: FieldType.SingleLineText,
+        options: {
+          showAs: {
+            type: SingleLineTextDisplayType.Email,
+          },
+        },
+      };
+      const newFieldRo: IFieldRo = {
+        name: 'New Name',
+        type: FieldType.SingleLineText,
+        options: {},
+      };
+
+      const { newField } = await expectUpdate(table1, sourceFieldRo, newFieldRo);
+      expect(newField.options).toEqual({});
+    });
+
+    it('should modify options showAs in formula', async () => {
+      const sourceFieldRo: IFieldRo = {
+        name: 'TextField',
+        description: 'hello',
+        type: FieldType.Formula,
+        options: {
+          expression: '"text"',
+          showAs: {
+            type: SingleLineTextDisplayType.Email,
+          },
+        },
+      };
+      const newFieldRo: IFieldRo = {
+        type: FieldType.Formula,
+        options: {
+          expression: '"text"',
+        },
+      };
+
+      const { newField } = await expectUpdate(table1, sourceFieldRo, newFieldRo);
+      expect(newField.options).toEqual({
+        expression: '"text"',
+      });
     });
 
     it.skipIf(globalThis.testConfig.driver === DriverClient.Sqlite)(
@@ -195,20 +253,7 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
         type: FieldType.Attachment,
       };
 
-      const { newField, values } = await expectUpdate(table1, sourceFieldRo, newFieldRo, [
-        [
-          {
-            id: 'actId',
-            name: 'example.jpg',
-            token: 'ivJAXrtjLeSZ',
-            size: 1,
-            mimetype: 'image/jpeg',
-            path: 'table/example',
-            bucket: '',
-          },
-        ],
-      ]);
-      expect(values[0]).toBeTruthy();
+      const { newField } = await expectUpdate(table1, sourceFieldRo, newFieldRo);
       expect(newField.name).toEqual('New Name');
     });
 
@@ -476,6 +521,54 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
       expect(newField.name).toEqual('my name');
       expect(newField.description).toEqual('world');
     });
+
+    // A -> B -> C
+    // D -> E -> C
+    // should not update E when A update
+    // all context: A, B, C, E
+    // update context: A, B, C
+    it('should not update E when A update', async () => {
+      const aField = await createField(table1.id, {
+        type: FieldType.Number,
+      });
+
+      const bField = await createField(table1.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `{${aField.id}}`,
+        },
+      });
+
+      const dField = await createField(table1.id, {
+        type: FieldType.Number,
+      });
+
+      const eField = await createField(table1.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `{${dField.id}}`,
+        },
+      });
+
+      const cField = await createField(table1.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `{${bField.id}} + {${eField.id}}`,
+        },
+      });
+
+      await updateRecordByApi(table1.id, table1.records[0].id, aField.id, 1);
+
+      await convertField(table1.id, bField.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `{${aField.id}} & ''`,
+        },
+      });
+
+      const record1 = await getRecord(table1.id, table1.records[0].id);
+      expect(record1.fields[cField.id]).toEqual('1null');
+    });
   });
 
   describe('convert text field', () => {
@@ -599,6 +692,14 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
       });
       expect(values[0]).toEqual(true);
       expect(values[1]).toEqual(undefined);
+    });
+
+    it('should not convert primary field to checkbox', async () => {
+      const newFieldRo: IFieldRo = {
+        type: FieldType.Checkbox,
+      };
+
+      await expect(convertField(table1.id, table1.fields[0].id, newFieldRo)).rejects.toThrow();
     });
 
     it('should convert text to date', async () => {
@@ -910,7 +1011,7 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
             { name: 'x', color: Colors.Blue },
             { name: 'y', color: Colors.Red },
             { name: "','" },
-            { name: ', ' },
+            { name: ',' },
             { name: 'z' },
           ],
         },
@@ -920,8 +1021,8 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
       expect(values[1]).toEqual(['x', 'y']);
       expect(values[2]).toEqual(['x', 'z']);
       expect(values[3]).toEqual(['x', "','"]);
-      expect(values[4]).toEqual(['x', 'y', ', ']);
-      expect(values[5]).toEqual(["','", ', ']);
+      expect(values[4]).toEqual(['x', 'y', ',']);
+      expect(values[5]).toEqual(["','", ',']);
     });
 
     it('should convert long text to attachment', async () => {
@@ -1369,8 +1470,6 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
 
     beforeEach(async () => {
       table1 = await createTable(baseId, { name: 'table1' });
-      table2 = await createTable(baseId, { name: 'table2' });
-      table3 = await createTable(baseId, { name: 'table3' });
 
       refField1 = await createField(table1.id, refField1Ro);
       refField2 = await createField(table1.id, refField2Ro);
@@ -1383,9 +1482,7 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
     });
 
     afterEach(async () => {
-      await deleteTable(baseId, table1.id);
-      await deleteTable(baseId, table2.id);
-      await deleteTable(baseId, table3.id);
+      await permanentDeleteTable(baseId, table1.id);
     });
 
     it('should convert formula and modify expression', async () => {
@@ -1428,6 +1525,52 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
 
       expect(records.records[0].fields[newField2.id]).toEqual(1);
       expect(records.records[1].fields[newField2.id]).toEqual(2);
+    });
+
+    it('should convert formula to text', async () => {
+      const dateTimeField = await createField(table1.id, {
+        type: FieldType.Date,
+        options: {
+          formatting: {
+            date: DateFormattingPreset.ISO,
+            time: TimeFormatting.Hour24,
+            timeZone: 'America/Los_Angeles',
+          },
+        },
+      });
+
+      const formulaField = await createField(table1.id, {
+        type: FieldType.Formula,
+        options: {
+          expression: `{${dateTimeField.id}}`,
+          formatting: {
+            date: DateFormattingPreset.ISO,
+            time: TimeFormatting.Hour12,
+            timeZone: 'America/Los_Angeles',
+          },
+        },
+      });
+
+      const updated = await updateRecordByApi(
+        table1.id,
+        table1.records[0].id,
+        dateTimeField.id,
+        '2024-02-28 16:00'
+      );
+
+      expect(updated.fields[dateTimeField.id]).toEqual('2024-02-29T00:00:00.000Z');
+      expect(updated.fields[formulaField.id]).toEqual('2024-02-29T00:00:00.000Z');
+
+      const textResult = await getRecord(table1.id, table1.records[0].id, CellFormat.Text);
+      expect(textResult.fields[dateTimeField.id]).toEqual('2024-02-28 16:00');
+      expect(textResult.fields[formulaField.id]).toEqual('2024-02-28 04:00 PM');
+
+      await convertField(table1.id, formulaField.id, {
+        type: FieldType.SingleLineText,
+      });
+
+      const results = await getRecord(table1.id, table1.records[0].id);
+      expect(results.fields[formulaField.id]).toEqual('2024-02-28 04:00 PM');
     });
   });
 
@@ -2892,7 +3035,6 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
       const beforeRecord = await getRecord(table1.id, table1.records[0].id);
       expect(beforeRecord.fields[lookupField.id]).toEqual('x');
 
-      console.log('start update');
       const newField = await convertField(table1.id, linkField.id, sourceFieldRo);
 
       expect(newField).toMatchObject({
@@ -3147,10 +3289,12 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
 
       const lookupField = await createField(table1.id, lookupFieldRo);
       // add a link record
+      // record[0] for linkField1
       await updateRecordByApi(table1.id, table1.records[0].id, linkField1.id, [
         { id: table2.records[0].id },
         { id: table2.records[1].id },
       ]);
+      // record[1] for linkField2
       await updateRecordByApi(table1.id, table1.records[1].id, linkField2.id, [
         { id: table2.records[0].id },
         { id: table2.records[1].id },
@@ -3170,7 +3314,6 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
         { id: table1.records[0].id },
         { id: table1.records[0].id },
       ]);
-
       await convertField(table1.id, lookupField.id, lookupFieldRo2);
       const linkField1After = await getField(table1.id, linkField1.id);
       expect(linkField1After).toMatchObject(linkField1);
@@ -3188,7 +3331,9 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
         { id: table2.records[1].id },
       ]);
 
+      // record[0] for lookupField is to be undefined
       expect(records[0].fields[lookupField.id]).toBeUndefined();
+      // record[1] for lookupField
       expect(records[1].fields[lookupField.id]).toEqual([
         { id: table1.records[1].id },
         { id: table1.records[1].id },
@@ -3240,6 +3385,95 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
 
       const { newField } = await expectUpdate(table1, lookupFieldRo, newLookupFieldRo, []);
       expect(newField.options).toEqual({});
+    });
+
+    it('should update show as for rollup and lookup', async () => {
+      const linkFieldRo: IFieldRo = {
+        type: FieldType.Link,
+        options: {
+          relationship: Relationship.ManyOne,
+          foreignTableId: table2.id,
+        },
+      };
+
+      const linkField = await createField(table1.id, linkFieldRo);
+      // set primary key 'x' in table2
+      await updateRecordByApi(table2.id, table2.records[0].id, table2.fields[0].id, 'x');
+      // add a link record
+      await updateRecordByApi(table1.id, table1.records[0].id, linkField.id, {
+        id: table2.records[0].id,
+      });
+
+      const lookupFieldRo: IFieldRo = {
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: table2.id,
+          lookupFieldId: table2.fields[0].id,
+          linkFieldId: linkField.id,
+        },
+        options: {
+          showAs: {
+            type: SingleLineTextDisplayType.Email,
+          },
+        },
+      };
+
+      const newLookupFieldRo: IFieldRo = {
+        type: FieldType.SingleLineText,
+        isLookup: true,
+        lookupOptions: {
+          foreignTableId: table2.id,
+          lookupFieldId: table2.fields[0].id,
+          linkFieldId: linkField.id,
+        },
+        options: {},
+      };
+
+      const rollupFieldRo: IFieldRo = {
+        type: FieldType.Rollup,
+        lookupOptions: {
+          foreignTableId: table2.id,
+          lookupFieldId: table2.fields[0].id,
+          linkFieldId: linkField.id,
+        },
+        options: {
+          expression: 'concatenate({values})',
+          showAs: {
+            type: SingleLineTextDisplayType.Email,
+          },
+        },
+      };
+
+      const newRollupFieldRo: IFieldRo = {
+        type: FieldType.Rollup,
+        lookupOptions: {
+          foreignTableId: table2.id,
+          lookupFieldId: table2.fields[0].id,
+          linkFieldId: linkField.id,
+        },
+        options: {
+          expression: 'concatenate({values})',
+        },
+      };
+
+      const { newField: newRollupField } = await expectUpdate(
+        table1,
+        rollupFieldRo,
+        newRollupFieldRo,
+        []
+      );
+      expect(newRollupField.options).toEqual({
+        expression: 'concatenate({values})',
+      });
+
+      const { newField: newLookupField } = await expectUpdate(
+        table1,
+        lookupFieldRo,
+        newLookupFieldRo,
+        []
+      );
+      expect(newLookupField.options).toEqual({});
     });
   });
 
@@ -3310,6 +3544,43 @@ describe('OpenAPI Freely perform column transformations (e2e)', () => {
       };
 
       await convertField(table2.id, rollupField.id, rollupFieldRo2);
+    });
+  });
+
+  describe('convert user field', () => {
+    bfAf();
+
+    it('should convert user field', async () => {
+      const oldFieldRo: IFieldRo = {
+        name: 'TextField',
+        description: 'hello',
+        type: FieldType.SingleLineText,
+      };
+      const newFieldRo: IFieldRo = {
+        name: 'New Name',
+        type: FieldType.User,
+      };
+
+      const { newField } = await expectUpdate(table1, oldFieldRo, newFieldRo, [
+        globalThis.testConfig.userName,
+        globalThis.testConfig.email,
+        globalThis.testConfig.userId,
+      ]);
+      expect(newField.type).toEqual(FieldType.User);
+
+      const { records } = await getRecords(table1.id, {
+        fieldKeyType: FieldKeyType.Id,
+        projection: [newField.id],
+      });
+      const notEmptyRecordsFields = records
+        .filter((r) => r.fields[newField.id] != null)
+        .map((r) => (r.fields[newField.id] as IUserCellValue).id);
+      expect(notEmptyRecordsFields).toHaveLength(3);
+      expect(notEmptyRecordsFields).toEqual([
+        globalThis.testConfig.userId,
+        globalThis.testConfig.userId,
+        globalThis.testConfig.userId,
+      ]);
     });
   });
 });

@@ -2,8 +2,7 @@ import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
 import { FieldOpBuilder, FieldType } from '@teable/core';
 import { PrismaService } from '@teable/db-main-prisma';
 import { Timing } from '../../../utils/timing';
-import { FieldCalculationService } from '../../calculation/field-calculation.service';
-import { ViewService } from '../../view/view.service';
+import { TableIndexService } from '../../table/table-index.service';
 import { FieldService } from '../field.service';
 import { IFieldInstance, createFieldInstanceByRaw } from '../model/factory';
 import { FieldSupplementService } from './field-supplement.service';
@@ -15,9 +14,8 @@ export class FieldDeletingService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly fieldService: FieldService,
-    private readonly fieldSupplementService: FieldSupplementService,
-    private readonly fieldBatchCalculationService: FieldCalculationService,
-    private readonly viewService: ViewService
+    private readonly tableIndexService: TableIndexService,
+    private readonly fieldSupplementService: FieldSupplementService
   ) {}
 
   private async markFieldsAsError(tableId: string, fieldIds: string[]) {
@@ -60,9 +58,8 @@ export class FieldDeletingService {
     }
   }
 
-  async delateFieldItem(tableId: string, field: IFieldInstance) {
+  async deleteFieldItem(tableId: string, field: IFieldInstance) {
     await this.cleanRef(field);
-    await this.viewService.deleteColumnMetaOrder(tableId, [field.id]);
     await this.fieldService.batchDeleteFields(tableId, [field.id]);
   }
 
@@ -85,15 +82,18 @@ export class FieldDeletingService {
       throw new ForbiddenException(`forbid delete primary field`);
     }
 
+    // delete index first
+    await this.tableIndexService.deleteSearchFieldIndex(tableId, field);
+
     if (type === FieldType.Link && !isLookup) {
       const linkFieldOptions = field.options;
       const { foreignTableId, symmetricFieldId } = linkFieldOptions;
       await this.fieldSupplementService.cleanForeignKey(linkFieldOptions);
-      await this.delateFieldItem(tableId, field);
+      await this.deleteFieldItem(tableId, field);
 
       if (symmetricFieldId) {
         const symmetricField = await this.getField(foreignTableId, symmetricFieldId);
-        symmetricField && (await this.delateFieldItem(foreignTableId, symmetricField));
+        symmetricField && (await this.deleteFieldItem(foreignTableId, symmetricField));
         return [
           { tableId, fieldId },
           { tableId: foreignTableId, fieldId: symmetricFieldId },
@@ -102,7 +102,7 @@ export class FieldDeletingService {
       return [{ tableId, fieldId }];
     }
 
-    await this.delateFieldItem(tableId, field);
+    await this.deleteFieldItem(tableId, field);
     return [{ tableId, fieldId }];
   }
 }

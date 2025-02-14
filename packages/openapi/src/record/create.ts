@@ -1,5 +1,6 @@
 import type { RouteConfig } from '@asteasolutions/zod-to-openapi';
 import { recordSchema } from '@teable/core';
+import type { AxiosResponse } from 'axios';
 import { axios } from '../axios';
 import { registerRoute, urlBuilder } from '../utils';
 import { z } from '../zod';
@@ -10,7 +11,7 @@ export const recordInsertOrderRoSchema = z
   .object({
     viewId: z.string().openapi({
       description:
-        'You can only specify order in one view when create record, other views appear last by default',
+        'You can only specify order in one view when create record (will create a order index automatically)',
     }),
     anchorId: z.string().openapi({
       description: 'The record id to anchor to',
@@ -87,6 +88,9 @@ export const CreateRecordRoute: RouteConfig = registerRoute({
   tags: ['record'],
 });
 
-export const createRecords = async (tableId: string, recordsRo: ICreateRecordsRo) => {
+export async function createRecords(
+  tableId: string,
+  recordsRo: ICreateRecordsRo
+): Promise<AxiosResponse<ICreateRecordsVo>> {
   return axios.post<ICreateRecordsVo>(urlBuilder(CREATE_RECORD, { tableId }), recordsRo);
-};
+}

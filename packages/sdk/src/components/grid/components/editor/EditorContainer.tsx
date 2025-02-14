@@ -1,8 +1,9 @@
 /* eslint-disable jsx-a11y/no-static-element-interactions */
+import { getRandomString } from '@teable/core';
 import { clamp } from 'lodash';
 import type { CSSProperties, ForwardRefRenderFunction } from 'react';
 import { useEffect, useRef, useMemo, useImperativeHandle, forwardRef } from 'react';
-import type { IGridTheme } from '../../configs';
+import { GRID_DEFAULT, type IGridTheme } from '../../configs';
 import { useKeyboardSelection } from '../../hooks';
 import type { IInteractionLayerProps } from '../../InteractionLayer';
 import {
@@ -29,11 +30,14 @@ export interface IEditorContainerProps
     | 'scrollToItem'
     | 'real2RowIndex'
     | 'getCellContent'
+    | 'onUndo'
+    | 'onRedo'
     | 'onCopy'
     | 'onPaste'
     | 'onDelete'
     | 'onRowAppend'
     | 'onRowExpand'
+    | 'scrollBy'
   > {
   isEditing?: boolean;
   scrollState: IScrollState;
@@ -54,7 +58,7 @@ export interface IEditorRef<T extends IInnerCell = IInnerCell> {
 
 export interface IEditorProps<T extends IInnerCell = IInnerCell> {
   cell: T;
-  rect: IRectangle;
+  rect: IRectangle & { editorId: string };
   theme: IGridTheme;
   style?: CSSProperties;
   isEditing?: boolean;
@@ -67,6 +71,7 @@ export interface IEditorContainerRef {
   saveValue?: () => void;
 }
 
+const { cellEditorEdgePadding } = GRID_DEFAULT;
 const NO_EDITING_CELL_TYPES = new Set([CellType.Boolean, CellType.Rating]);
 
 export const EditorContainerBase: ForwardRefRenderFunction<
@@ -82,6 +87,8 @@ export const EditorContainerBase: ForwardRefRenderFunction<
     selection,
     activeCellBound,
     scrollToItem,
+    onUndo,
+    onRedo,
     onCopy,
     onPaste,
     onChange,
@@ -92,6 +99,7 @@ export const EditorContainerBase: ForwardRefRenderFunction<
     setSelection,
     real2RowIndex,
     getCellContent,
+    scrollBy,
   } = props;
   const { scrollLeft, scrollTop } = scrollState;
   const { rowIndex, realRowIndex, columnIndex } = useMemo(() => {
@@ -111,6 +119,7 @@ export const EditorContainerBase: ForwardRefRenderFunction<
   const height = activeCellBound?.height ?? coordInstance.getRowHeight(rowIndex);
   const editorRef = useRef<IEditorRef | null>(null);
   const defaultFocusRef = useRef<HTMLInputElement | null>(null);
+  const editorId = useMemo(() => `editor-container-${getRandomString(8)}`, []);
 
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.focus?.(),
@@ -135,13 +144,15 @@ export const EditorContainerBase: ForwardRefRenderFunction<
     activeCell,
     selection,
     coordInstance,
-    onCopy,
+    onUndo,
+    onRedo,
     onDelete,
     onRowExpand,
     setEditing,
     setActiveCell,
     setSelection,
     scrollToItem,
+    scrollBy,
   });
 
   const editorStyle = useMemo(
@@ -157,20 +168,22 @@ export const EditorContainerBase: ForwardRefRenderFunction<
     const x = clamp(
       coordInstance.getColumnRelativeOffset(columnIndex, scrollLeft),
       columnInitSize,
-      containerWidth - width
+      containerWidth - width - cellEditorEdgePadding
     );
     const y = clamp(
       coordInstance.getRowOffset(rowIndex) - scrollTop,
       rowInitSize,
       containerHeight - height
     );
+
     return {
       x,
       y,
       width,
       height,
+      editorId,
     };
-  }, [coordInstance, rowIndex, columnIndex, width, height, scrollLeft, scrollTop]);
+  }, [coordInstance, rowIndex, columnIndex, width, height, scrollLeft, scrollTop, editorId]);
 
   const EditorRenderer = useMemo(() => {
     if (readonly) return null;
@@ -278,8 +291,16 @@ export const EditorContainerBase: ForwardRefRenderFunction<
     onPaste?.(selection, e);
   };
 
+  const onCopyInner = (e: React.ClipboardEvent) => {
+    if (!activeCell || isEditing) return;
+    onCopy?.(selection, e);
+  };
+
   return (
-    <div className="click-outside-ignore pointer-events-none absolute left-0 top-0 w-full">
+    <div
+      id={editorId}
+      className="click-outside-ignore pointer-events-none absolute left-0 top-0 w-full"
+    >
       <div
         className="absolute z-10"
         style={{
@@ -290,6 +311,7 @@ export const EditorContainerBase: ForwardRefRenderFunction<
         }}
         onKeyDown={onKeyDown}
         onPaste={onPasteInner}
+        onCopy={onCopyInner}
       >
         {EditorRenderer}
         <input className="opacity-0" ref={defaultFocusRef} />

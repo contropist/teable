@@ -2,7 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 import { addPassword } from '@teable/openapi';
 import { passwordSchema } from '@teable/openapi/src/auth/types';
 import { useSession } from '@teable/sdk/hooks';
-import { Spin } from '@teable/ui-lib/base';
+import { Error, Spin } from '@teable/ui-lib/base';
 import {
   Button,
   Dialog,
@@ -18,7 +18,6 @@ import {
 } from '@teable/ui-lib/shadcn';
 import { useTranslation } from 'next-i18next';
 import { useEffect, useState } from 'react';
-import { Error } from '@/components/Error';
 
 export const AddPassword = () => {
   const [newPassword, setNewPassword] = useState('');
@@ -44,7 +43,7 @@ export const AddPassword = () => {
       return;
     }
     if (newPassword && confirmPassword && !passwordSchema.safeParse(newPassword).success) {
-      setError(t('settings.account.addPasswordError.invalid'));
+      setError(t('password.setInvalid'));
       return;
     }
     setError('');
